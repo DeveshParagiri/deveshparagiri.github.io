@@ -9,7 +9,7 @@ profile:
   image_circular: true # crops the image to make it circular
   more_info:
 
-news: false # includes a list of news items
+news: true # includes a list of news items
 selected_papers: false # includes a list of papers marked as "selected={true}"
 social: false # includes social icons at the bottom of the page
 ---
@@ -22,6 +22,4 @@ I am currently working as a **Software Engineer** at **hushh.ai**, specializing 
 
 When I'm not immersed in code, you'll find me exploring new destinations, staying active with workouts and soccer, and cruising around on my skateboard!
 
-Excited to continue learning and making an impact in the tech world! 
-
-Feel free to reach out at `devesh.paragiri@gmail.com`.
+Feel free to reach out at `devesh.paragiri@gmail.com` for any queries or collaborations!
