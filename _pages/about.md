@@ -2,10 +2,10 @@
 layout: about
 title: about
 permalink: /
-subtitle: <a href='mailto:devesh.paragiri@gmail.com'>email</a> | <a href='https://linkedin.com/in/devesh-paragiri'>linkedin</a> | <a href='https://github.com/deveshparagiri'>github</a> | <a href='https://medium.com/@devesh.paragiri'>medium</a>
+subtitle: <b>devesh.paragiri@gmail.com</b> | <a href='https://linkedin.com/in/devesh-paragiri'>linkedin</a> | <a href='https://github.com/deveshparagiri'>github</a> | <a href='https://medium.com/@devesh.paragiri'>medium</a>
 profile:
   align: right
-  image: prof_pic.jpg
+  image: pfp.png
   image_circular: true # crops the image to make it circular
   more_info:
 
