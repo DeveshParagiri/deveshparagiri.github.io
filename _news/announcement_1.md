@@ -5,4 +5,4 @@ inline: true
 related_posts: false
 ---
 
-*Cool stuff coming soon!* :rocket:
+:orange_book: Currently reading: Look homeward, Angel by Thomas Wolfe
