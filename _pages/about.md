@@ -14,11 +14,13 @@ selected_papers: false # includes a list of papers marked as "selected={true}"
 social: false # includes social icons at the bottom of the page
 ---
 
-Hey! I'm **Dev**, a rising Junior at the University of Maryland, College Park majoring in Computer Science.
+Hey! I'm **Dev**, a rising Junior at the University of Maryland, majoring in Computer Science.
 
 My interests span Machine Learning, Artificial Intelligence, Data Science, Web Development, and Gen AI-based applications.
 
-I am currently working as a **Software Engineer** at **hushh.ai**, specializing in API development and creating robust data collection and processing systems for our products.
+I'm currently pursuing undergraduate research under **Dr. George Hurtt** for the "High-Resolution Carbon Modeling and Monitoring: Continuing Prototype Development, Research, and Scoping" project funded by the **NASA GEDI** program. 
+
+I was previously a **Software Engineer** at **hushh.ai**, specializing in API development and creating robust data collection and processing systems for our products.
 
 When I'm not immersed in code, you'll find me exploring new destinations, staying active with workouts and soccer, and cruising around on my skateboard!
 
