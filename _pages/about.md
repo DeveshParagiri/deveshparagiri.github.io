@@ -18,7 +18,7 @@ Hey! I'm **Dev**, a rising Junior at the University of Maryland, majoring in Com
 
 My interests span Machine Learning, Artificial Intelligence, Data Science, Web Development, and Gen AI-based applications.
 
-I'm currently pursuing undergraduate research under **Dr. George Hurtt** for the "High-Resolution Carbon Modeling and Monitoring: Continuing Prototype Development, Research, and Scoping" project funded by the **NASA GEDI** program. 
+I'm currently pursuing undergraduate research under **Dr. George Hurtt**. 
 
 I was previously a **Software Engineer** at **hushh.ai**, specializing in API development and creating robust data collection and processing systems for our products.
 
