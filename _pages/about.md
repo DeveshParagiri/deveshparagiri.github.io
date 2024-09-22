@@ -14,6 +14,7 @@ news: false # includes a list of news items
 selected_papers: false # includes a list of papers marked as "selected={true}"
 social: false # includes social icons at the bottom of the page
 ---
+
 Hey! I'm **Dev**, a Junior at the University of Maryland, majoring in Computer Science.
 
 My interests span Machine Learning, Artificial Intelligence, Data Science, Web Development, and Gen AI-based applications.
