@@ -15,6 +15,14 @@
   <li class="my-2">
     <a class="text-pink-700 underline font-semibold hover:text-pink-800" href="{{ site.baseurl }}{{ post.url }}">{{ post.title }}</a>
   </li>
+
+  <li class="my-2">
+    {% if post.url contains 'http' %}
+      <a class="text-pink-700 underline font-semibold hover:text-pink-800" href="{{ post.url }}">{{ post.title }}</a>
+    {% else %}
+      <a class="text-pink-700 underline font-semibold hover:text-pink-800" href="{{ site.baseurl }}{{ post.url }}">{{ post.title }}</a>
+    {% endif %}
+  </li>
 {% endfor %}
 {% if site.newsletter.enabled and site.footer_fixed %}
   <p class="mb-2" style="margin-top: 1.5rem !important">Subscribe to be notified of future articles:</p>

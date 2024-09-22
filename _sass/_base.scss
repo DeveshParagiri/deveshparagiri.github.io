@@ -22,7 +22,9 @@ strong {
 hr {
   border-top: 1px solid var(--global-divider-color);
 }
-
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro", "Roboto", "Helvetica Neue", Arial, sans-serif;
+}
 table {
   td,
   th {
