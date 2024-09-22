@@ -84,7 +84,7 @@ kaggle_id: # your kaggle id
 keybase_username: # your keybase user name
 lastfm_id: # your lastfm id
 lattes_id: # your ID on Lattes (Brazilian Lattes CV)
-linkedin_username: # your LinkedIn user name
+linkedin_username: devesh-paragiri # your LinkedIn user name
 mastodon_username: # your mastodon instance+username in the format instance.tld/@username
 medium_username: devesh.paragiri # your Medium username
 orcid_id: # your ORCID ID
@@ -123,7 +123,7 @@ cronitor_analytics: # cronitor RUM analytics site ID (format: XXXXXXXXX)
 pirsch_analytics: # your Pirsch analytics site ID (length 32 characters)
 
 # For Google Search Console, see https://support.google.com/webmasters/answer/9008080?hl=en#meta_tag_verification&zippy=%2Chtml-tag
-google_site_verification: # your google-site-verification ID (Google Search Console)
+google_site_verification: 4DEHTA0KJMU6wkYCnJ72LI4oOvgLi6oDCqqzRqojMgc # your google-site-verification ID (Google Search Console)
 bing_site_verification: # out your bing-site-verification ID (Bing Webmaster)
 
 # -----------------------------------------------------------------------------
@@ -141,19 +141,19 @@ pagination:
 
 related_blog_posts:
   enabled: false
-  max_related: 5
+  max_related: 1
 
 # Giscus comments (RECOMMENDED)
 # Follow instructions on https://giscus.app/ to setup for your repo to fill out the information below.
 giscus:
-  repo: # <your-github-user-name>/<your-github-repo-name>
-  repo_id: # leave empty or specify your repo_id (see https://giscus.app/)
-  category: Comments # name of the category under which discussions will be created
-  category_id: # leave empty or specify your category_id (see https://giscus.app/)
+  repo: deveshparagiri/deveshparagiri.github.io # <your-github-user-name>/<your-github-repo-name>
+  repo_id: R_kgDOM1M5ZQ # leave empty or specify your repo_id (see https://giscus.app/)
+  category: General # name of the category under which discussions will be created
+  category_id: DIC_kwDOM1M5Zc4CirYs # leave empty or specify your category_id (see https://giscus.app/)
   mapping: title # identify discussions by post title
   strict: 1 # use strict identification mode
   reactions_enabled: 1 # enable (1) or disable (0) emoji reactions
-  input_position: bottom # whether to display input form below (bottom) or above (top) the comments
+  input_position: top # whether to display input form below (bottom) or above (top) the comments
   theme: preferred_color_scheme # name of the color scheme (preferred works well with al-folio light/dark mode)
   emit_metadata: 0
   lang: en
@@ -302,8 +302,8 @@ jekyll-archives:
     tag: "/blog/tag/:name/"
     category: "/blog/category/:name/"
 
-display_tags: ["formatting", "images", "links", "math", "code", "blockquotes"] # these tags will be displayed on the front page of your blog
-display_categories: ["external-services"] # these categories will be displayed on the front page of your blog
+display_tags: ["AI", "cloud", "web-dev", "math"] # these tags will be displayed on the front page of your blog
+display_categories: ["code", "travel", "other"] # these categories will be displayed on the front page of your blog
 
 # -----------------------------------------------------------------------------
 # Jekyll Scholar

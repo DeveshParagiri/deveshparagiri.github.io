@@ -25,6 +25,10 @@ hr {
 body {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro", "Roboto", "Helvetica Neue", Arial, sans-serif;
 }
+
+.post-page {
+  font-weight: 400; // Override font weight for the about page
+}
 table {
   td,
   th {
