@@ -24,6 +24,7 @@ hr {
 }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro", "Roboto", "Helvetica Neue", Arial, sans-serif;
+  font-weight: 350;
 }
 
 .post-page {
@@ -518,11 +519,11 @@ footer.sticky-bottom {
 .header-bar {
   border-bottom: 1px solid var(--global-divider-color);
   text-align: center;
-  padding-top: 2rem;
-  padding-bottom: 3rem;
+  padding-top: 1rem;
+  padding-bottom: 1rem;
 
   h1 {
-    color: var(--global-theme-color);
+    color: var(--global-text-color);
     font-size: 5rem;
   }
 }

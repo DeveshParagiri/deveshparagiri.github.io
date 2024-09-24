@@ -19,9 +19,9 @@ Hey! I'm **Dev**, a Junior at the University of Maryland, majoring in Computer S
 
 My interests span Machine Learning, Artificial Intelligence, Data Science, Web Development, and Gen AI-based applications.
 
-I'm currently pursuing undergraduate research under **Dr. George Hurtt** at the Global Ecology Lab, focused on spatial and temporal scales using the latest remote sensing data and models.
+I'm currently pursuing undergraduate research under **[Dr. George Hurtt](https://scholar.google.com/citations?user=wr0aDMEAAAAJ&hl=en)** at the **[Global Ecology Lab](https://gel.umd.edu/)**, focused on spatial and temporal scales using the latest remote sensing data and models.
 
-I was previously a **Software Engineer** at **hushh.ai**, specializing in API development and creating robust data collection and processing systems for their products.
+Previously, I was a **Software Engineer** at **[hushh.ai](https://hush1one.com)**, specializing in API development and creating robust data collection and processing systems for their products.
 
 When I'm not immersed in code, you'll find me exploring new destinations, staying active with workouts and soccer, and cruising around on my skateboard!
 
