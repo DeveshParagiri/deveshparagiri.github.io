@@ -8,7 +8,7 @@ categories: code
 related_posts: false
 giscus_comments: true
 toc:
-  beginning: true
+  sidebar: left
 published: true
 ---
 
