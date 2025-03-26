@@ -12,11 +12,12 @@ toc:
 ---
 
 ## **Introduction**
+
 <br>
 
 AI agents are all the hype. 2025 is touted to be the year of agents. Some say they'll take over all our jobs; others call them an over-engineered gimmick. Regardless of where you stand, one thing is clear: **agents are here to stay**, and they're poised to reshape how developers build and interact with software.
 
-But before you jump on the hype train, it's worth asking – *what actually sets agents apart from traditional AI workflows?* And when should you use one over another? 
+But before you jump on the hype train, it's worth asking – _what actually sets agents apart from traditional AI workflows?_ And when should you use one over another?
 
 This blog breaks down the technical differences between agents and workflows – just the key details with implications for your tech stack.
 
@@ -24,20 +25,20 @@ This blog breaks down the technical differences between agents and workflows –
 ## **Agents vs Workflows - TLDR**
 <br>
 
-| **Feature** | **AI Agent** | **AI Workflow** |
-| --- | --- | --- |
-| Core Idea | Autonomous Entity with goals + reasoning | Perform a defined sequence of tasks |
-| State | Has memory, state, and internal feedback loops | Usually static or explicit state |
-| Flexibility | Dynamic, pivots according to the requirement | Predefined, changes require editing the flow |
-| Determinism | Non-deterministic; same prompt ≠ same output | Deterministic (mostly) |
-| Sample use-case | Open-ended tasks, multiple steps, vague goals | Structured, repeated, and known flows |
+| **Feature**     | **AI Agent**                                   | **AI Workflow**                              |
+| --------------- | ---------------------------------------------- | -------------------------------------------- |
+| Core Idea       | Autonomous Entity with goals + reasoning       | Perform a defined sequence of tasks          |
+| State           | Has memory, state, and internal feedback loops | Usually static or explicit state             |
+| Flexibility     | Dynamic, pivots according to the requirement   | Predefined, changes require editing the flow |
+| Determinism     | Non-deterministic; same prompt ≠ same output   | Deterministic (mostly)                       |
+| Sample use-case | Open-ended tasks, multiple steps, vague goals  | Structured, repeated, and known flows        |
 
 <br>
 ## **So what is an Agent?**
 <br>
 Think of an agent as your mini-employee with a brain, a set of tasks, and access to tools.
 
-You give it a goal and it figures out how to get there – which tools to use, questions to ask, and maybe even ask clarifying questions. The agent has full autonomy every step of the way, including the output.  
+You give it a goal and it figures out how to get there – which tools to use, questions to ask, and maybe even ask clarifying questions. The agent has full autonomy every step of the way, including the output.
 
 An agent can evaluate it's own response and choose to restart it's task. Effectively, the agent can optimize it's own processes.
 
@@ -74,7 +75,7 @@ result = agent.run("Create Quarto Docs for this repo.")
 
 A **workflow** is more like a flowchart. You lay out the steps: "Do A, then B, then C." It's deterministic, composable, and rock-solid for anything structured.
 
-Think CI/CD pipelines, document processing chains, or RAG pipelines. 
+Think CI/CD pipelines, document processing chains, or RAG pipelines.
 
 <br>
 #### **Core Behaviors:**
@@ -83,7 +84,7 @@ Think CI/CD pipelines, document processing chains, or RAG pipelines.
 - **Composable:** You can chain blocks together easily.
 - **Debuggable:** You know exactly where something breaks.
 - **Efficient:** Less overhead, faster runtime.
-  
+
 <br>
 ```python
 chain = (
@@ -107,7 +108,7 @@ You get the flexibility of agents without compromising on the reliability of wor
 ## **Conclusion**
 <br>
 
-Agents are *not* here to replace workflows. They're here to unlock new kinds of problems we couldn't automate before.
+Agents are _not_ here to replace workflows. They're here to unlock new kinds of problems we couldn't automate before.
 
 Use **agents** when you want flexible, autonomous decision-making.
 
