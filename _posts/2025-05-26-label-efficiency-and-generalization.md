@@ -243,8 +243,7 @@ To better understand how each class was predicted over time, I generated confusi
   - Fewer mislabels from manual annotation
 
 > The generalized model’s consistent performance across years confirms that the **spatial and spectral normalization approach** was effective.
-
-## {: .block-tip }
+{: .block-tip }
 
 <br>
 
