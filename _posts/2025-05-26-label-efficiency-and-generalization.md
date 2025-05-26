@@ -25,18 +25,20 @@ I try to answer three core questions:
 3. Can a model trained on one year (2014) generalize to another (2020)?
 
 ---
+
 <br>
 ## **Data and Setup**
 
 - All pixels were extracted from spectrally and spatially normalized NAIP imagery (2014–2022).
 - Manual labels were created by visually inspecting .png previews across years for each sampled coordinate.
 - Each labeled pixel was represented using either:
-    - **4-band spectral input**: Red, Green, Blue, NIR
-    - **5-band input**: Red, Green, Blue, NIR, NDVI
+  - **4-band spectral input**: Red, Green, Blue, NIR
+  - **5-band input**: Red, Green, Blue, NIR, NDVI
 
 The model used in all experiments is a RandomForestClassifier from sklearn.
 
 ---
+
 <br>
 ## **Experiment 1: Accuracy vs Label Count (With and Without NDVI)**
 
@@ -54,13 +56,14 @@ I trained the classifier using only labeled pixels from **2014**. For each value
 ### **Results Summary**
 
 | **Labeled/Class (k)** | **Accuracy (w/o NDVI)** | **Accuracy (w/ NDVI)** |
-| --- | --- | --- |
-| 5 | ~52% ± high variance | ~74% ± lower variance |
-| 8 | ~65% | ~77% |
-| 13 | ~75% | **~85%** |
+| --------------------- | ----------------------- | ---------------------- |
+| 5                     | ~52% ± high variance    | ~74% ± lower variance  |
+| 8                     | ~65%                    | ~77%                   |
+| 13                    | ~75%                    | **~85%**               |
 
 In the first experiment, I found that adding NDVI to the input significantly improves model performance, especially at low sample counts.
 <br>
+
 ##### **Key Takeaways:**
 
 - NDVI significantly boosts accuracy, especially at **low sample counts**
@@ -69,6 +72,7 @@ In the first experiment, I found that adding NDVI to the input significantly imp
 - With NDVI, LIVE pixels are often learned with high confidence even with 5–6 examples
 
 ---
+
 <br>
 ## **Experiment 2: Cross-Year Generalization (Train on 2014 → Test on 2020)**
 
@@ -95,18 +99,19 @@ Classification Report:
     </div>
 </div>
 
-
 ---
+
 <br>
 ## **Implications**
 
 - **NDVI improves generalization** by providing a vegetation-specific signal that remains valid across years.
 - The model is most confident on **LIVE** pixels, suggesting that greenness + NDVI are strong predictors.
 - **DEAD** and **BARE** are more difficult to distinguish — these likely require:
-    - More training samples
-    - Spatial or temporal context (e.g., adjacent pixels, change over time)
+  - More training samples
+  - Spatial or temporal context (e.g., adjacent pixels, change over time)
 
 ---
+
 <br>
 ## **Conclusions**
 
@@ -115,6 +120,7 @@ Classification Report:
 - NDVI should be included as a feature — it boosts performance significantly and reduces label burden.
 
 ---
+
 <br>
 ## **Next Steps**
 
