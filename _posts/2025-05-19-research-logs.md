@@ -10,9 +10,11 @@ pretty_table: true
 toc:
   sidebar: left
 ---
+
 ---
 
 ## **Log 1: DeepForest Approach**
+
 <br>
 
 ### **Research Question**
@@ -20,6 +22,7 @@ toc:
 How can we reliably detect **tree mortality** across time using **aerial imagery**? Can **pretrained object detection models**, like **DeepForest**, give us useful indicators of **tree health or death**?
 
 ---
+
 <br>
 ### **Phase 1 Approach — Using DeepForest for Crown Detection**
 
@@ -30,6 +33,7 @@ DeepForest is a state-of-the-art deep learning model trained on RGB imagery to d
 - Mortality via **absence or degradation** of detected crowns
 
 ---
+
 <br>
 
 ### **Thought Process**
@@ -41,15 +45,16 @@ Use a pretrained model to:
 - Detect **tree loss trends over time** without training from scratch
 
 ---
+
 <br>
 ### **Methodology**
 
 - **Imagery Source:** NAIP (2014–2022), 512×512 RGB tiles, resolution: 1.0m → 0.6m
 - **Tool:** [`DeepForest`](https://github.com/weecology/DeepForest)
 - **Workflow:**
-    - Load NAIP tile
-    - Predict bounding boxes using pretrained model
-    - Compare box count and coverage across years
+  - Load NAIP tile
+  - Predict bounding boxes using pretrained model
+  - Compare box count and coverage across years
 
 ```python
 from deepforest import main
@@ -73,6 +78,7 @@ boxes = model.predict_image(path="naip_tile.png", return_plot=True)
 </div>
 
 ---
+
 <br>
 ### **Challenges Encountered**
 <br>
@@ -81,26 +87,29 @@ boxes = model.predict_image(path="naip_tile.png", return_plot=True)
 - Crowns were **blurry**, often **undetected or merged** into clusters.
 
 ##### 2. **Bounding Boxes ≠ Tree Area**
+
 - Boxes were **not calibrated** to actual canopy area.
 - Detection size and count varied erratically due to visual artifacts.
 
 ##### 3. **Noisy Temporal Consistency**
+
 - Detections fluctuated due to shadows, season, sun angle — **not ecological change**.
 - Trees "disappeared" or "reappeared" randomly between years.
 
 ---
+
 <br>
 
 ### **Summary**
 
-
-| Metric | Result |
-| --- | --- |
-| Visual Interpretability | ❌ Low |
-| Spatial Precision | ❌ Weak |
-| Temporal Consistency | ❌ Unusable |
+| Metric                  | Result      |
+| ----------------------- | ----------- |
+| Visual Interpretability | ❌ Low      |
+| Spatial Precision       | ❌ Weak     |
+| Temporal Consistency    | ❌ Unusable |
 
 ---
+
 <br>
 
 ### **Key Takeaways**
@@ -127,12 +136,14 @@ We needed a strategy focused on **semantic labeling** (LIVE / DEAD / BARE), not 
 Label small regions of aerial imagery based on **ecological intuition**, using spatial patches instead of pixel-level or bounding box classification.
 
 ---
+
 <br>
 ### **Phase 2 Approach — 5×5 Patch Labeling Using Human Intuition**
 
 Each 512×512 tile was divided into a 5×5 grid (i.e. ~25×25 pixel patches). Each patch was visually labeled based on **dominant appearance**: LIVE, DEAD, or BARE.
 
 ---
+
 <br>
 ### **Thought Process**
 
@@ -141,6 +152,7 @@ Each 512×512 tile was divided into a 5×5 grid (i.e. ~25×25 pixel patches). Ea
 - Provides enough context for human labeling (e.g., sparse vs dense canopy)
 
 ---
+
 <br>
 ### **Methodology**
 
@@ -148,28 +160,26 @@ Each 512×512 tile was divided into a 5×5 grid (i.e. ~25×25 pixel patches). Ea
 
 - Each tile → ~100+ 5×5 patches
 - Recorded in `valid_patches.csv`:
-    
-    ```
-    r329_c58_y2020.png, 329, 58, 2020, , possibly BARE or DEAD
-    ```
-    
+  ```
+  r329_c58_y2020.png, 329, 58, 2020, , possibly BARE or DEAD
+  ```
 
 ##### 2. **Visual Labeling**
 
 - No NDVI or thresholding
 - Labels were assigned via:
-    - Manual inspection across years
-    - Texture, color, and shape
-    - "Hint" labels updated during review
+  - Manual inspection across years
+  - Texture, color, and shape
+  - "Hint" labels updated during review
 
 ##### 3. **Model Training**
 
 - Feature extraction:
-    - RGB stats (mean, std)
-    - Optional raw pixel flattening
+  - RGB stats (mean, std)
+  - Optional raw pixel flattening
 - Classifier:
-    - Random Forest (baseline)
-    - Small MLP (later)
+  - Random Forest (baseline)
+  - Small MLP (later)
 
 ---
 
@@ -223,13 +233,14 @@ Each 512×512 tile was divided into a 5×5 grid (i.e. ~25×25 pixel patches). Ea
 <br>
 ### **Summary**
 
-| Metric | Result |
-| --- | --- |
-| In-year Accuracy | ~65–70% |
+| Metric                    | Result           |
+| ------------------------- | ---------------- |
+| In-year Accuracy          | ~65–70%          |
 | Cross-year Generalization | ❌ Failed (<50%) |
-| Label Noise | High |
+| Label Noise               | High             |
 
 ---
+
 <br>
 ### **Key Takeaways**
 
@@ -246,6 +257,7 @@ Each 512×512 tile was divided into a 5×5 grid (i.e. ~25×25 pixel patches). Ea
 To resolve both spectral and spatial instability, we transitioned to **pixel-level temporal modeling** — tracking **individual pixels across all years**. That's the focus of **Log 3**.
 
 ---
+
 <br>
 ## **Log 3: Single Pixel Temporal Classification**
 
@@ -255,6 +267,7 @@ To resolve both spectral and spatial instability, we transitioned to **pixel-lev
 Track **individual pixels** over time and use their **temporal NDVI trajectories** to classify them into ecological categories (LIVE, DEAD, BARE).
 
 ---
+
 <br>
 ### **Phase 3 Approach — Per-Pixel Temporal NDVI Classifier**
 
@@ -280,37 +293,32 @@ We moved away from patches and bounding boxes entirely. Each pixel became its ow
 - Spatially aligned tiles across years (2014–2022)
 - Pixels indexed by `row`, `col`
 - Each pixel assigned time-series NDVI values:
-    
-    ```
-    filename,row,col,year,ndvi,label_hint
-    r327_c59_y2020.png,327,59,2020,0.162,"possibly BARE or DEAD"
-    
-    ```
-    
+
+  ```
+  filename,row,col,year,ndvi,label_hint
+  r327_c59_y2020.png,327,59,2020,0.162,"possibly BARE or DEAD"
+
+  ```
 
 ##### 2. **Labeling Strategy**
 
 - Combined:
-    - Visual inspection across years
-    - NDVI pattern (e.g., drop then flatten)
-    - Human-annotated hints like "likely DEAD"
+  - Visual inspection across years
+  - NDVI pattern (e.g., drop then flatten)
+  - Human-annotated hints like "likely DEAD"
 
 ##### 3. **Model Input**
 
 - Each training sample: NDVI vector across years
-    
-    ```
-    [0.58 (2014), 0.56 (2016), 0.44 (2018), 0.23 (2020), 0.22 (2022)]
-    → label: DEAD
-    ```
-    
+  ```
+  [0.58 (2014), 0.56 (2016), 0.44 (2018), 0.23 (2020), 0.22 (2022)]
+  → label: DEAD
+  ```
 
 ---
 
 <br>
 ### **Sample Outputs**
-
-
 
 <div class="row mt-3">
     <div class="col-sm mt-3 mt-md-0">
@@ -355,11 +363,11 @@ We moved away from patches and bounding boxes entirely. Each pixel became its ow
 <br>
 ### **Current Status**
 
-| Metric | Result |
-| --- | --- |
-| Temporal NDVI consistency | ✅ Strong |
-| Human label quality | ✅ High confidence |
-| Class balance | ⚠️ Still tuning |
-| Next step | Expand labeled samples & train temporal classifier |
+| Metric                    | Result                                             |
+| ------------------------- | -------------------------------------------------- |
+| Temporal NDVI consistency | ✅ Strong                                          |
+| Human label quality       | ✅ High confidence                                 |
+| Class balance             | ⚠️ Still tuning                                    |
+| Next step                 | Expand labeled samples & train temporal classifier |
 
 ---
