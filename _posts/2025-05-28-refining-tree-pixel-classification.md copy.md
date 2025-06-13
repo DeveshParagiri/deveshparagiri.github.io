@@ -12,6 +12,7 @@ toc:
 ---
 
 ## **Motivation**
+
 Accurate analysis of temporal vegetation transitions—such as LIVE → DEAD or DEAD → BARE—requires reliable alignment of pixels across years. Even after spatial preprocessing like warping and histogram matching, small-scale spatial drift can occur, especially in high-resolution NAIP imagery.
 
 This poses a significant problem for longitudinal classification. If the same (row, col) location in one year corresponds to a slightly shifted feature in another (e.g., shadow, soil), observed changes may reflect misalignment rather than ecological dynamics.
@@ -23,15 +24,16 @@ To rigorously evaluate class transitions and develop robust temporal models, we 
 <br>
 
 ## **Identifying a Fixed Reference Point**
-To ground the analysis, we manually located a visually bright, highly consistent white patch—most likely a man-made structure or tower—within the 2014 NAIP image. This was done using RGB previews of the matched_buffer_{year}.tif files in QGIS.
+
+To ground the analysis, we manually located a visually bright, highly consistent white patch—most likely a man-made structure or tower—within the 2014 NAIP image. This was done using RGB previews of the matched*buffer*{year}.tif files in QGIS.
 
 We then traced this patch across earlier years and visually validated its shifted position in 2016 and 2018. The corresponding row/column locations are:
 
 | **Year** | **Row** | **Col** |
-| --- | --- | --- |
-| 2014 | 119 | 224 |
-| 2016 | 121 | 224 |
-| 2018 | 118 | 224 |
+| -------- | ------- | ------- |
+| 2014     | 119     | 224     |
+| 2016     | 121     | 224     |
+| 2018     | 118     | 224     |
 
 <br>
 No precise match could be confirmed for 2020 and 2022, likely due to changes in lighting conditions or NDVI spectral compression in post-processing.
@@ -50,17 +52,11 @@ No precise match could be confirmed for 2020 and 2022, likely due to changes in 
 We define three conceptual degrees of spatial drift:
 
 - ###### **Level 1: Linear Shift**
-    
-    Straightforward pixel-level movement (±1–3 pixels), often due to image resampling or slight registration error.
-    
+  Straightforward pixel-level movement (±1–3 pixels), often due to image resampling or slight registration error.
 - ###### **Level 2: Rotational/Angular Misalignment**
-    
-    Small-angle shifts or skewing that change the neighborhood context of a patch (i.e., rotated trees or canopy boundaries).
-    
+  Small-angle shifts or skewing that change the neighborhood context of a patch (i.e., rotated trees or canopy boundaries).
 - ###### **Level 3: Raster-Wide Nonlinear Drift**
-    
-    Region-specific distortions or warping effects that cannot be corrected via uniform translation.
-    
+  Region-specific distortions or warping effects that cannot be corrected via uniform translation.
 
 In this study, we focused on evaluating Level 1 drift at the patch (5×5) and pixel levels.
 
@@ -97,11 +93,11 @@ For each location, we:
 <br>
 ### **Patch-Level (5×5)**
 
-| **Metric** | **Fixed** | **Corrected** |
-| --- | --- | --- |
-| Mean NDVI std | 0.01902 | 0.02078 |
-| T-statistic | -1.5629 |  |
-| P-value | 0.12452 |  |
+| **Metric**    | **Fixed** | **Corrected** |
+| ------------- | --------- | ------------- |
+| Mean NDVI std | 0.01902   | 0.02078       |
+| T-statistic   | -1.5629   |               |
+| P-value       | 0.12452   |               |
 
 <div class="row mt-3">
     <div class="col-sm mt-3 mt-md-0">
@@ -114,14 +110,15 @@ For each location, we:
 NDVI temporal variance was slightly higher after drift correction, but the difference was not statistically significant. This suggests that 5×5 patches may already average out small shifts, providing inherent spatial robustness.
 
 ---
+
 <br>
 ### **Pixel-Level (1×1)**
 
-| **Metric** | **Fixed** | **Corrected** |
-| --- | --- | --- |
-| Mean NDVI std | 0.03982 | 0.02163 |
-| T-statistic | 5.4654 |  |
-| P-value | 0.000002 |  |
+| **Metric**    | **Fixed** | **Corrected** |
+| ------------- | --------- | ------------- |
+| Mean NDVI std | 0.03982   | 0.02163       |
+| T-statistic   | 5.4654    |               |
+| P-value       | 0.000002  |               |
 
 <div class="row mt-3">
     <div class="col-sm mt-3 mt-md-0">
@@ -134,6 +131,7 @@ NDVI temporal variance was slightly higher after drift correction, but the diffe
 At the pixel level, drift correction substantially reduced NDVI variance over time. This indicates that raw pixel comparisons are highly sensitive to even minor misalignments, validating the need for patch-based or drift-corrected strategies in pixelwise classification.
 
 ---
+
 <br>
 ## **Implications for Temporal Classification**
 
@@ -149,6 +147,7 @@ In contrast, aggregating over 5×5 patches appears to mitigate these issues. For
 2. Switching to patch-based classification frameworks.
 
 ---
+
 <br>
 ## **Limitations and Next Steps**
 
@@ -157,12 +156,14 @@ In contrast, aggregating over 5×5 patches appears to mitigate these issues. For
 - NDVI was the only signal used for comparison (future versions may include full spectral MSE)
 
 ---
+
 <br>
 ## **Class Transition Validation Under Drift Correction**
 
 To further quantify the impact of spatial drift, we evaluated how **class transitions across years** are affected by fixed vs. drift-corrected sampling. The goal was to check whether implausible transitions—e.g., BARE → DEAD or DEAD → LIVE—are more common when drift is not accounted for.
 
 ---
+
 <br>
 ### **Motivation**
 
@@ -171,6 +172,7 @@ Temporal classification relies not just on stable NDVI signals but also on **rea
 Spatial drift can artificially introduce these implausible sequences. This section evaluates whether correcting for drift reduces the frequency of such transitions across the entire buffer.
 
 ---
+
 <br>
 ### **Hypothesis**
 
@@ -181,6 +183,7 @@ Spatial drift can artificially introduce these implausible sequences. This secti
 - This effect should be statistically significant
 
 ---
+
 <br>
 ### **Method**
 
@@ -192,14 +195,15 @@ For each pixel in the valid interior region of the buffer:
 4. **Count transitions** of form: (class_t → class_t+1) for each consecutive year pair
 5. **Tabulate** transition matrices for both fixed and corrected cases
 6. **Highlight implausible transitions**, defined as:
-    - DEAD → LIVE
-    - BARE → DEAD
-    - BARE → LIVE
+   - DEAD → LIVE
+   - BARE → DEAD
+   - BARE → LIVE
 7. **Plot**
-    - Heatmaps of transition probabilities
-    - Bar plots of total implausible transition percentages
+   - Heatmaps of transition probabilities
+   - Bar plots of total implausible transition percentages
 
 ---
+
 <br>
 ### **Results**
 <br>
@@ -219,7 +223,6 @@ For each pixel in the valid interior region of the buffer:
     </div>
 </div>
 
-
 ---
 
 ### **Bar Chart: Implausible Transition Rates**
@@ -231,19 +234,20 @@ For each pixel in the valid interior region of the buffer:
 </div>
 
 | **Transition Period** | **Fixed (%)** | **Corrected (%)** |
-| --- | --- | --- |
-| 2014 → 2016 | 15.5% | 13.4% |
-| 2016 → 2018 | 19.8% | 14.4% |
+| --------------------- | ------------- | ----------------- |
+| 2014 → 2016           | 15.5%         | 13.4%             |
+| 2016 → 2018           | 19.8%         | 14.4%             |
 
 <br>
 **Statistical Test (Chi²):**
 
 - **χ² Statistic:** 144.07
 - **P-value:** < 0.000001
-    
+
 → **Statistically significant improvement** in plausibility after drift correction
-    
+
 ---
+
 <br>
 ### **Interpretation**
 
@@ -252,6 +256,7 @@ For each pixel in the valid interior region of the buffer:
 - Statistical testing confirms that this reduction is unlikely to be due to chance.
 
 ---
+
 <br>
 ## **Final Takeaways**
 
