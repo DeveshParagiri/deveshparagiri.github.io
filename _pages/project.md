@@ -27,8 +27,8 @@ A comprehensive web application that solves [specific problem]. This project inv
 [Describe main technical challenges faced and how you solved them]
 <br><br>
 <strong>Links:</strong><br>
-🔗 <a href="[GitHub-URL]">GitHub Repository</a><br>
-🌐 <a href="[Live-Demo-URL]">Live Demo</a>
+🔗 GitHub Repository (Coming Soon)<br>
+🌐 Live Demo (Coming Soon)
 </details>
 
 ---
@@ -53,8 +53,8 @@ A cross-platform mobile application designed for [specific use case]. This app f
 [What you learned from this project - new technologies, methodologies, etc.]
 <br><br>
 <strong>Links:</strong><br>
-🔗 <a href="[GitHub-URL]">GitHub Repository</a><br>
-📱 <a href="[App-Store-URL]">App Store</a> (Coming Soon)
+🔗 GitHub Repository (Coming Soon)<br>
+📱 App Store (Coming Soon)
 </details>
 
 ---
@@ -79,8 +79,8 @@ An interactive data visualization and analysis tool built for [specific domain/i
 [Quantifiable results or impact of the project]
 <br><br>
 <strong>Links:</strong><br>
-🔗 <a href="[GitHub-URL]">GitHub Repository</a><br>
-📊 <a href="[Demo-URL]">Interactive Demo</a>
+🔗 GitHub Repository (Coming Soon)<br>
+📊 Interactive Demo (Coming Soon)
 </details>
 
 ---
@@ -105,8 +105,8 @@ An interactive data visualization and analysis tool built for [specific domain/i
 [Mention any interesting technical aspects, algorithms used, architecture decisions, etc.]
 <br><br>
 <strong>Links:</strong><br>
-🔗 <a href="[GitHub-URL]">GitHub Repository</a><br>
-🌐 <a href="[Live-URL]">Live Project</a>
+🔗 GitHub Repository (Coming Soon)<br>
+🌐 Live Project (Coming Soon)
 </details>
 
 ---
@@ -125,6 +125,6 @@ An interactive data visualization and analysis tool built for [specific domain/i
 [Describe how your contributions helped the community or improved the projects]
 <br><br>
 <strong>Links:</strong><br>
-👨‍💻 <a href="[GitHub-Profile]">GitHub Profile</a><br>
-📈 <a href="[Contribution-Stats]">Contribution Statistics</a>
+👨‍💻 GitHub Profile (Coming Soon)<br>
+📈 Contribution Statistics (Coming Soon)
 </details>

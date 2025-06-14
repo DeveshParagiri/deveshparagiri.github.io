@@ -80,9 +80,9 @@ The composite score integrates:
 - **Implausibility Penalty**: Penalizes unnatural reversals (e.g., BARE → DEAD)
 - **Entropy Penalty**: Penalizes instability in row-wise transition distributions
 
-> Scoring function:
->
-> `Score = -Entropy + Decay Reward - Implausible Penalty`
+```text
+SCORE = -Entropy + Decay Reward - Implausible Penalty
+```
 
 This metric encodes more biological realism and rewards transitions that align with ecological degradation.
 
