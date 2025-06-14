@@ -13,7 +13,7 @@ toc:
 
 ## **Overview**
 
-This report/blog post extends my previous work on classifying LIVE, DEAD, and BARE tree pixels in aerial imagery. It focuses on refining model performance through targeted labeling improvements, class rebalancing, and updated predictions across five years of NAIP imagery.
+This report extends my previous work on classifying LIVE, DEAD, and BARE tree pixels in aerial imagery. It focuses on refining model performance through targeted labeling improvements, class rebalancing, and updated predictions across five years of NAIP imagery.
 
 <br>
 ### **Objectives**
@@ -233,3 +233,5 @@ The test confirms that class distributions are **not independent across years** 
 - Investigate spatial drift between years by comparing prediction shifts in fixed coordinates
 - Validate results with external field survey data or high-res canopy maps
 - Expand the labeling dataset to include denser forest sections for generalization
+
+Refer [here](/blog/tag/research/) for all research reports.

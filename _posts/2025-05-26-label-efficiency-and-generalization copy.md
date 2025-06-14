@@ -276,3 +276,5 @@ From all experiments, I observed that performance gains are **nonlinear** with r
 
 - Increase the number of labeled pixels per class to 30–40 to further reduce variance.
 - Investigate spatial context by incorporating patch-level features (e.g., 3×3 or 5×5 neighborhoods).
+
+Refer [here](/blog/tag/research/) for all research reports.

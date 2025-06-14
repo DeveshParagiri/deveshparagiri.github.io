@@ -266,3 +266,5 @@ For each pixel in the valid interior region of the buffer:
 - This two-pronged analysis—NDVI time-series + transition plausibility—offers a comprehensive method for diagnosing and mitigating drift in remote sensing studies
 
 ---
+
+Refer [here](/blog/tag/research/) for all research reports.
