@@ -13,6 +13,23 @@ toc:
 
 ---
 
+<br>
+## **Motivation**
+
+<div class="row mt-3">
+    <div class="col-sm mt-3 mt-md-0">
+        {% include figure.liquid loading="eager" path="assets/img/research_log/maingraph.png" class="img-fluid rounded z-depth-1" zoomable=true caption="" %}
+    </div>
+</div>
+
+The sharp divergence between ED-Lidar reconstructions, Landsat NDVI, and AmeriFlux GPP observations (see figure) around 2010–2020 sparked this investigation. While historical reconstructions suggest stable or even rising productivity, both satellite vegetation indices (NDVI) and flux tower data show a clear decline in GPP at the US-MPJ site during this period.
+
+This discrepancy raised a key question:
+Is this ecosystem experiencing large-scale tree mortality that is not being captured by traditional models?
+
+To answer this, we developed an image-based approach to directly detect vegetation loss and tree death from aerial imagery, aiming to complement and explain these broader ecosystem signals.
+
+<br>
 ## **Log 1: DeepForest Approach**
 
 <br>
