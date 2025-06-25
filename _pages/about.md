@@ -25,7 +25,11 @@ social: false # includes social icons at the bottom of the page
 - **recently:**
 
   - made an **[AI agent](https://image2thing.com)** for 3D modeling via text and images
-
+  
   - built an **[AI cli tool](https://github.com/DeveshParagiri/buildme)** for zsh with smart undo, workflow recoding, etc.
+
   - an open source **[code visualization tool](https://www.gitprobe.com)** for providing LLMs context
+
   - 3-second **[log-streaming setup tool](https://www.logsy.info)** optimized for mobile (**[#13 on PH globally](https://www.producthunt.com/products/logsy)**)
+
+  - a **[web app](https://www.logsy.info)** for streaming logs to LLMs
