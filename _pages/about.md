@@ -31,5 +31,3 @@ social: false # includes social icons at the bottom of the page
   - an open source **[code visualization tool](https://www.gitprobe.com)** for providing LLMs context
 
   - 3-second **[log-streaming setup tool](https://www.logsy.info)** optimized for mobile (**[#13 on PH globally](https://www.producthunt.com/products/logsy)**)
-
-  - a **[web app](https://www.logsy.info)** for streaming logs to LLMs
