@@ -23,17 +23,17 @@ $pink-color-light: #ffdddd !default;
 $yellow-color: #efcc00 !default;
 
 $grey-color: #828282 !default;
-$grey-color-light: lighten($grey-color, 40%);
-$grey-color-dark: #1c1c1d;
+$grey-color-light: lighten($grey-color, 35%);
+$grey-color-dark: #0a0a0a;
 $grey-900: #212529;
 
-$white-color: #ffffff !default;
+$white-color: #f7f7f7 !default;
 $black-color: #000000 !default;
 
 // Theme colors
 
 $code-bg-color-light: rgba($purple-color, 0.05);
-$code-bg-color-dark: #2c3237 !default;
+$code-bg-color-dark: #0e0e0e !default;
 
 // Font awesome location
 $fa-font-path: "../webfonts";

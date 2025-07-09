@@ -13,38 +13,34 @@ toc:
 
 ## **Introduction**
 
+---
+
 The US-MPJ site has exhibited conflicting trends in ecosystem productivity from 2010 onward. While ED-LiDAR reconstructions indicate stable or rising productivity, both Landsat NDVI and AmeriFlux tower observations (GPP) show a marked decline. This divergence raises a key question: Is rapid, large-scale canopy mortality being missed by traditional models?
 
 To investigate, we developed a lightweight image-based classifier using high-resolution NAIP aerial imagery to directly detect tree mortality. We then analyzed class transitions across time (2014–2022) and validated findings against tower-based GPP observations.
 
 ---
 
-<br>
-
 ## **Model Retraining with Updated Labels**
 
-We curated a refined labeled dataset of 1500 high-confidence samples across three classes:
+---
 
-- **LIVE**, **DEAD**, and **BARE**
-- Labeling combined NDVI-based filtering and visual inspection across 5 NAIP years
-
-##### **Feature Extraction**
+We curated a refined labeled dataset of 1500 high-confidence samples across three classes: `LIVE, DEAD, BARE`. Labeling combined NDVI-based filtering and visual inspection across 5 NAIP years.
 
 For each pixel, we extracted:
 
 - Red, Green, Blue, NIR
 - NDVI = (NIR - Red) / (NIR + Red)
 
+---
+
 ##### **Classifier Details**
 
 - **Model**: Random Forest (100 trees)
 - **Sampling**: Stratified 80/20 train-test split
 - **Balancing**: Class weights set to "balanced"
-
-##### **Evaluation**
-
 - **Accuracy**: 0.838
-- **Classification Report**:
+
 
 ```
               precision    recall  f1-score   support
@@ -55,17 +51,17 @@ For each pixel, we extracted:
 
 ---
 
-<br>
 ## **Temporal Transition Analysis (2014–2022)**
-
+---
 <div class="row mt-3">
     <div class="col-sm mt-3 mt-md-0">
         {% include figure.liquid loading="eager" path="assets/img/model_eval/predictions.png" class="img-fluid rounded z-depth-1" zoomable=true caption="Figure 1 – Heatmap of Plausibility (Simple Score) Across Fixed Drift Combinations" %}
     </div>
 </div>
 
-- For each pair of years, we exhaustively tested 625 spatial drift combinations
-- Selected configuration minimizing biologically implausible transitions (e.g., DEAD → BARE)
+For each pair of years, we exhaustively tested 625 spatial drift combinations, and selected the configuration minimizing biologically implausible transitions (e.g., DEAD → BARE)
+
+---
 
 | Year Pair   | Best Drift   | Notes                          |
 | ----------- | ------------ | ------------------------------ |
@@ -82,9 +78,8 @@ For each pixel, we extracted:
 
 ---
 
-<br>
 ## **Pixel Class Trends Over Time**
-
+---
 <div class="row mt-3">
     <div class="col-sm mt-3 mt-md-0">
         {% include figure.liquid loading="eager" path="assets/img/model_eval/r.png" class="img-fluid rounded z-depth-1" zoomable=true caption="Figure 2 – Raster Trend" %}
@@ -93,17 +88,14 @@ For each pixel, we extracted:
 
 **Confidence Intervals:** Based on classifier precision (LIVE: 95%, DEAD: 62%, BARE: 87%)
 
-#### **Trend Summary**
-
 - **BARE**: Steady increase throughout
 - **DEAD**: Falls after 2018, partial rebound by 2022
 - **LIVE**: Rises until 2020, then declines sharply
 
 ---
 
-<br>
 ## **Cross-Validation with AmeriFlux GPP**
-
+---
 <div class="row mt-3">
     <div class="col-sm mt-3 mt-md-0">
         {% include figure.liquid loading="eager" path="assets/img/model_eval/gpp.png" class="img-fluid rounded z-depth-1" zoomable=true caption="Figure 3 – GPP vs Model" %}
@@ -112,38 +104,32 @@ For each pixel, we extracted:
 
 This analysis is based on AmeriFlux GPP data from the US-MPJ site.
 
-#### **Correlation**
-
 - Spearman ρ = **-0.800**, p = 0.200 (n = 4)
 - Moderate-to-strong negative trend between canopy loss and productivity
 
-#### **Interpretation**
-
-- Despite small sample size, the directionality supports hypothesis
-- BARE% rise coincides with sharp GPP fall (2016–2020)
+Despite small sample size, the directionality supports hypothesis. BARE% rise coincides with sharp GPP fall (2016–2020)
 
 ---
 
-<br>
 ## **Discussion**
+
+---
 
 - **Drift correction** improves temporal consistency in pixel-wise transitions
 - **Model confidence** (especially for BARE) lends weight to ecological interpretation
 - **ED-LiDAR reconstructions** likely miss rapid disturbance pulses
 
-**Limitations**
-
-- Spatial resolution mismatch between tower and NAIP raster
-- Small test set; more ground truth would improve model robustness
+**Limitations:** Spatial resolution mismatch between tower and NAIP raster, small test set; more ground truth would improve model robustness
 
 ---
 
-<br>
 ## **Conclusion**
+
+---
 
 Our approach demonstrates that lightweight, image-based classifiers can reveal large-scale canopy mortality trends consistent with independent tower and satellite records. These models offer a promising supplement to traditional ecological reconstructions.
 
-#### **Next Steps**
+Next steps:
 
 - Apply SIFT for more complex transition matching
 - Validate with 2022 AmeriFlux GPP
