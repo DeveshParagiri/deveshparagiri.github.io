@@ -20,14 +20,16 @@ social: false # includes social icons at the bottom of the page
 
 - research @ [gel](https://gel.umd.edu/) under [Dr. George Hurtt](https://scholar.google.com/citations?user=wr0aDMEAAAAJ&hl=en)
 
-- prev SWE @ [hushh.ai](https://hush1one.com) where I helped build the data wallet API
-
 - **recently:**
 
   - made an **[AI agent](https://image2thing.com)** for 3D modeling via text and images
   
   - built an **[AI cli tool](https://github.com/DeveshParagiri/buildme)** for zsh with smart undo, workflow recoding, etc.
 
-  - an open source **[code visualization tool](https://www.gitprobe.com)** for providing LLMs context
+  - an open source **[code visualization tool](https://www.gitprobe.com)** for providing LLMs context (**[#23 on PH](https://www.producthunt.com/products/gitprobe)**)
 
-  - 3-second **[log-streaming setup tool](https://www.logsy.info)** optimized for mobile (**[#13 on PH globally](https://www.producthunt.com/products/logsy)**)
+
+  - 3-second **[log-streaming setup tool](https://www.logsy.info)** optimized for mobile (**[#13 on PH](https://www.producthunt.com/products/logsy)**)
+
+<br>
+
