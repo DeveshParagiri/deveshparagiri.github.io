@@ -166,8 +166,8 @@ disqus_shortname: # put your disqus shortname
 # If you have blog posts published on medium.com or other external sources,
 # you can display them in your blog by adding a link to the RSS feed.
 external_sources:
-  - name: medium.com
-    rss_url: https://medium.com/@devesh.paragiri/feed
+  # - name: medium.com
+  #   rss_url: https://medium.com/@devesh.paragiri/feed
   # - name: Google Blog
   #   posts:
   #     - url: https://blog.google/technology/ai/google-gemini-update-flash-ai-assistant-io-2024/
@@ -302,8 +302,8 @@ jekyll-archives:
     tag: "/blog/tag/:name/"
     category: "/blog/category/:name/"
 
-display_tags: ["AI", "cloud", "research"] # these tags will be displayed on the front page of your blog
-display_categories: ["code", "travel", "other"] # these categories will be displayed on the front page of your blog
+display_tags: ["AI", "research"] # these tags will be displayed on the front page of your blog
+display_categories: ["code"] # these categories will be displayed on the front page of your blog
 
 # -----------------------------------------------------------------------------
 # Jekyll Scholar

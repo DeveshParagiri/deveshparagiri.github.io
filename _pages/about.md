@@ -7,11 +7,11 @@ subtitle:
 profile:
   align: right
   image: pfp.png
-  image_circular: true # crops the image to make it circular
+  image_circular: true
 
-news: false # includes a list of news items
+news: false
 selected_papers: false # includes a list of papers marked as "selected={true}"
-social: false # includes social icons at the bottom of the page
+social: false
 ---
 
 **[`github`](https://github.com/deveshparagiri)** **[`linkedin`](https://linkedin.com/in/devesh-paragiri)** **[`X`](https://x.com/devparagiri)**
