@@ -23,7 +23,15 @@ hr {
   border-top: 1px solid var(--global-divider-color);
 }
 body {
-  font-family: "Geist", -apple-system, BlinkMacSystemFont, "SF Pro", "Roboto", "Helvetica Neue", Arial, sans-serif;
+  font-family:
+    "Geist",
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro",
+    "Roboto",
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
   font-weight: 350;
 }
 
@@ -42,13 +50,25 @@ table {
   }
 }
 
-a,
-table.table a {
+a {
   color: var(--global-theme-color);
 
   &:hover {
     color: var(--global-theme-color);
-    text-decoration: underline;
+    text-decoration: none;
+  }
+
+  &:hover:after :not(.nav-item.dropdown) {
+    width: 100%;
+  }
+}
+
+table.table a {
+  color: var(--global-text-color);
+
+  &:hover {
+    color: var(--global-theme-color);
+    text-decoration: none;
   }
 
   &:hover:after :not(.nav-item.dropdown) {
@@ -1311,3 +1331,9 @@ ninja-keys::part(ninja-input-wrapper) {
   background-color: var(--global-theme-color);
   color: var(--global-text-color);
 }
+//
+// .mermaid svg {
+//   width: 100% !important;
+//   height: auto !important;
+//   max-width: none !important;
+// }

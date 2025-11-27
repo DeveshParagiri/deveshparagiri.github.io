@@ -136,7 +136,7 @@ let setMermaidTheme = (theme) => {
     elem.innerHTML = svgCode;
   });
 
-  mermaid.initialize({ theme: theme });
+  mermaid.initialize({ theme: theme, useMaxWidth: false });
   window.mermaid.init(undefined, document.querySelectorAll(".mermaid"));
 
   const observable = document.querySelector(".mermaid svg");
