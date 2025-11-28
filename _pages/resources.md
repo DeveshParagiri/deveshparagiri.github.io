@@ -31,3 +31,4 @@ nav_order: 3
 - [crawl4ai.com](https://docs.crawl4ai.com/) - oss webscraper
 - [reflex.dev](https://reflex.dev/) - webapps in python?!
 - [bytemonk](https://www.youtube.com/c/bytemonk) - sys design goat
+- [whitehouse/genesis-mission](https://www.whitehouse.gov/presidential-actions/2025/11/launching-the-genesis-mission/) - ai manhattan
