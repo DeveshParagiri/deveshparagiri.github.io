@@ -14,7 +14,7 @@ keywords: dev paragiri, devesh paragiri, devesh, dev paragiri website, devesh pa
 lang: en # the language of your site (for example: en, fr, cn, ru, etc.)
 icon: picon.png # the emoji used as the favicon (alternatively, provide image name in /assets/img/)
 
-url: https://deveshparagiri.github.io # the base hostname & protocol for your site
+url: https://deveshparagiri.com # the base hostname & protocol for your site
 baseurl: # the subpath of your site, e.g. /blog/. Leave blank for root
 last_updated: true # set to true if you want to display last updated in the footer
 impressum_path: # set to path to include impressum link in the footer, use the same path as permalink in a page, helps to conform with EU GDPR
