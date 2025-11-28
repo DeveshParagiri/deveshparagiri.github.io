@@ -35,9 +35,6 @@ body {
   font-weight: 350;
 }
 
-.post-page {
-  font-weight: 400; // Override font weight for the about page
-}
 table {
   td,
   th {
@@ -1354,6 +1351,15 @@ strong {
   div,
   li,
   span {
-    font-weight: 300;
+    font-weight: 320;
   }
+}
+
+p {
+  margin-bottom: 1.2rem;
+}
+
+h3 {
+  margin-top: 2.4rem;
+  margin-bottom: 1rem;
 }
