@@ -7,8 +7,6 @@ tags: ai, research
 categories: code
 published: true
 pretty_table: true
-toc:
-  sidebar: left
 ---
 
 ## **Introduction**
@@ -41,7 +39,6 @@ For each pixel, we extracted:
 - **Balancing**: Class weights set to "balanced"
 - **Accuracy**: 0.838
 
-
 ```
               precision    recall  f1-score   support
        LIVE       0.86      0.81      0.83        31
@@ -52,7 +49,9 @@ For each pixel, we extracted:
 ---
 
 ## **Temporal Transition Analysis (2014–2022)**
+
 ---
+
 <div class="row mt-3">
     <div class="col-sm mt-3 mt-md-0">
         {% include figure.liquid loading="eager" path="assets/img/model_eval/predictions.png" class="img-fluid rounded z-depth-1" zoomable=true caption="Figure 1 – Heatmap of Plausibility (Simple Score) Across Fixed Drift Combinations" %}
@@ -79,7 +78,9 @@ For each pair of years, we exhaustively tested 625 spatial drift combinations, a
 ---
 
 ## **Pixel Class Trends Over Time**
+
 ---
+
 <div class="row mt-3">
     <div class="col-sm mt-3 mt-md-0">
         {% include figure.liquid loading="eager" path="assets/img/model_eval/r.png" class="img-fluid rounded z-depth-1" zoomable=true caption="Figure 2 – Raster Trend" %}
@@ -95,7 +96,9 @@ For each pair of years, we exhaustively tested 625 spatial drift combinations, a
 ---
 
 ## **Cross-Validation with AmeriFlux GPP**
+
 ---
+
 <div class="row mt-3">
     <div class="col-sm mt-3 mt-md-0">
         {% include figure.liquid loading="eager" path="assets/img/model_eval/gpp.png" class="img-fluid rounded z-depth-1" zoomable=true caption="Figure 3 – GPP vs Model" %}

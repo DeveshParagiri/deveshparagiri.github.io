@@ -7,8 +7,6 @@ tags: ai, research
 categories: code
 published: true
 pretty_table: true
-toc:
-  sidebar: left
 ---
 
 ## **Motivation**

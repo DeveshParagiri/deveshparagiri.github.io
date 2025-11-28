@@ -1,20 +1,13 @@
 ---
 layout: post
-title: Detecting Tree Mortality from Aerial Imagery
+title: Exploring Tree Mortality Detection Approaches from Aerial Imagery
 date: 2025-05-18 16:00:00-0400
 description:
 tags: ai, research
 categories: code
 published: true
 pretty_table: true
-toc:
-  sidebar: left
 ---
-
----
-
-<br>
-## **Motivation**
 
 <div class="row mt-3">
     <div class="col-sm mt-3 mt-md-0">
@@ -25,25 +18,19 @@ toc:
 The sharp divergence between ED-Lidar reconstructions, Landsat NDVI, and AmeriFlux GPP observations (see figure) around 2010–2020 sparked this investigation. While historical reconstructions suggest stable or even rising productivity, both satellite vegetation indices (NDVI) and flux tower data show a clear decline in GPP at the US-MPJ site during this period.
 
 This discrepancy raised a key question:
-Is this ecosystem experiencing large-scale tree mortality that is not being captured by traditional models?
+_Is this ecosystem experiencing large-scale tree mortality that is not being captured by traditional models?_
 
-To answer this, we developed an image-based approach to directly detect vegetation loss and tree death from aerial imagery, aiming to complement and explain these broader ecosystem signals.
-
-<br>
-## **Log 1: DeepForest Approach**
-
-<br>
-
-### **Research Question**
-
-How can we reliably detect **tree mortality** across time using **aerial imagery**? Can **pretrained object detection models**, like **DeepForest**, give us useful indicators of **tree health or death**?
+To answer this, I developed an image-based approach to directly detect vegetation loss and tree death from aerial imagery, aiming to complement and explain these broader ecosystem signals. This report is a log of various initial approaches which were not pursued further due to inconclusive results. The final log throws light on the current approach being pursued due to its promising nature. The later research reports help to track tree mortality and its various real-world applications for NASA CMS etc.
 
 ---
 
-<br>
-### **Phase 1 Approach — Using DeepForest for Crown Detection**
+### **DeepForest Approach**
 
-DeepForest is a state-of-the-art deep learning model trained on RGB imagery to detect **individual tree crowns**. It outputs **bounding boxes** around tree-like objects, which initially seemed promising for analyzing:
+---
+
+I focus on how to reliably detect **tree mortality** across time using **aerial imagery**? Can **pretrained object detection models**, like **DeepForest**, give us useful indicators of **tree health or death**?
+
+[DeepForest](https://github.com/weecology/DeepForest) is a SOTA model trained on RGB imagery to detect **individual tree crowns**. It outputs **bounding boxes** around tree-like objects, which initially seemed promising for analyzing:
 
 - **Tree count changes over time**
 - **Tree canopy shrinkage**
@@ -51,27 +38,9 @@ DeepForest is a state-of-the-art deep learning model trained on RGB imagery to d
 
 ---
 
-<br>
-
-### **Thought Process**
-
-Use a pretrained model to:
-
-- Quickly extract structured detections
-- Use **bounding box count or size** as a proxy for forest density
-- Detect **tree loss trends over time** without training from scratch
+I use a pretrained model to quickly extract structured detections and use **bounding box count or size** as a proxy for forest density. This would be the first step towards detecting **tree loss trends over time** without training from scratch. Iused NAIP imagery from 2014-2022 split into `512x512` tiles. One interesting thing to note was the resolution change from 1.0m to 0.6m during the transition year of 2018.
 
 ---
-
-<br>
-### **Methodology**
-
-- **Imagery Source:** NAIP (2014–2022), 512×512 RGB tiles, resolution: 1.0m → 0.6m
-- **Tool:** [`DeepForest`](https://github.com/weecology/DeepForest)
-- **Workflow:**
-  - Load NAIP tile
-  - Predict bounding boxes using pretrained model
-  - Compare box count and coverage across years
 
 ```python
 from deepforest import main
@@ -82,8 +51,9 @@ boxes = model.predict_image(path="naip_tile.png", return_plot=True)
 
 ---
 
-<br>
-### **Sample Outputs**
+#### **Sample Outputs**
+
+---
 
 <div class="row mt-3">
     <div class="col-sm mt-3 mt-md-0">
@@ -94,114 +64,27 @@ boxes = model.predict_image(path="naip_tile.png", return_plot=True)
     </div>
 </div>
 
----
+While promising, the spatial resolution mismatch meant Icould not perform any temporal analysis. To add, DeeForest was trained on ~0.1m resolution which led to noisy predictoins due to the coarse nature of our NAIP tiles (1.0m/0.6m). Another key issue was that bounding boxes around trees did not necessarily translate to tree area, invalidating any use of true detection – which varied erratically due to visual artifacts.
 
-<br>
-### **Challenges Encountered**
-<br>
-##### 1. **Spatial Resolution Mismatch**
-- DeepForest was trained on ~0.1m resolution. NAIP tiles at 1.0m/0.6m were **too coarse**.
-- Crowns were **blurry**, often **undetected or merged** into clusters.
-
-##### 2. **Bounding Boxes ≠ Tree Area**
-
-- Boxes were **not calibrated** to actual canopy area.
-- Detection size and count varied erratically due to visual artifacts.
-
-##### 3. **Noisy Temporal Consistency**
-
-- Detections fluctuated due to shadows, season, sun angle — **not ecological change**.
-- Trees "disappeared" or "reappeared" randomly between years.
+In summary, visual interpretability, spatial precision, and temporal consistency were all poor leading to exploring alternative approaches.
 
 ---
 
-<br>
-
-### **Summary**
-
-| Metric                  | Result      |
-| ----------------------- | ----------- |
-| Visual Interpretability | ❌ Low      |
-| Spatial Precision       | ❌ Weak     |
-| Temporal Consistency    | ❌ Unusable |
+### **Patch-Based Classification**
 
 ---
 
-<br>
+I needed a strategy focused on semantic labeling (LIVE / DEAD / BARE), not detection. This led to the `5x5` patch-based classification approach. The goal was to label small regions of aerial imagery based on **ecological intuition**, using spatial patches instead of pixel-level or bounding box classification.
 
-### **Key Takeaways**
+Each 512×512 tile was divided into a `5×5` grid (i.e. ~25×25 pixel patches). Each patch was visually labeled based on **dominant appearance**: LIVE, DEAD, or BARE. The thought process was this was smoother than pixel classification yet easier than labeling full tiles while providing enough context for human labeling (e.g., sparse vs dense canopy).
 
-- Pretrained models are **domain-constrained**
-- Tree detection ≠ mortality inference
-- **RGB-only features are too volatile** over time
+I recorded each tile into patches with relevant metadata. A sample record would read as `r329_c58_y2020.png, 329, 58, 2020, , possibly BARE or DEAD`. Labels were then assigned via manual inspection across year with texture, color and shape being taken into account. I then make a simple RandomForest model (baseline) with RGB stats as our core features.
 
 ---
 
-<br>
-### **Transition to Next Phase**
-
-We needed a strategy focused on **semantic labeling** (LIVE / DEAD / BARE), not detection. This led to the **5x5 patch-based classification** approach — covered next in **Log 2**.
+#### **Sample Outputs**
 
 ---
-
-<br>
-## **Log 2: Patch-Based Classification**
-
-<br>
-### **Research Goal**
-
-Label small regions of aerial imagery based on **ecological intuition**, using spatial patches instead of pixel-level or bounding box classification.
-
----
-
-<br>
-### **Phase 2 Approach — 5×5 Patch Labeling Using Human Intuition**
-
-Each 512×512 tile was divided into a 5×5 grid (i.e. ~25×25 pixel patches). Each patch was visually labeled based on **dominant appearance**: LIVE, DEAD, or BARE.
-
----
-
-<br>
-### **Thought Process**
-
-- Smoother than pixel classification
-- Easier than labeling full tiles
-- Provides enough context for human labeling (e.g., sparse vs dense canopy)
-
----
-
-<br>
-### **Methodology**
-
-##### 1. **Patch Generation**
-
-- Each tile → ~100+ 5×5 patches
-- Recorded in `valid_patches.csv`:
-  ```
-  r329_c58_y2020.png, 329, 58, 2020, , possibly BARE or DEAD
-  ```
-
-##### 2. **Visual Labeling**
-
-- No NDVI or thresholding
-- Labels were assigned via:
-  - Manual inspection across years
-  - Texture, color, and shape
-  - "Hint" labels updated during review
-
-##### 3. **Model Training**
-
-- Feature extraction:
-  - RGB stats (mean, std)
-  - Optional raw pixel flattening
-- Classifier:
-  - Random Forest (baseline)
-  - Small MLP (later)
-
----
-
-<br>
-### **Sample Outputs**
 
 <div class="row mt-3">
     <div class="col-sm mt-3 mt-md-0">
@@ -226,116 +109,29 @@ Each 512×512 tile was divided into a 5×5 grid (i.e. ~25×25 pixel patches). Ea
 
 ---
 
-<br>
-### **Challenges Encountered**
-<br>
-
-##### 1. **Labeling Conflicts (Majority Dilemma)**
-
-- Mixed-content patches (e.g., half LIVE, half DEAD)
-- Label assignment was subjective → high variance
-
-##### 2. **Spectral Inconsistency**
-
-- Same class in different years looked different (due to sensors, lighting)
-- Model trained on one year **couldn't generalize** to another
-
-##### 3. **Spatial Drift**
-
-- Misalignments between years → same patch ID pointed to **different physical areas**
-- Resolution changes (1m vs 0.6m) broke equivalence
+This was a promising direction but had drawbacks. For instance, I encountered labeling conflicts with mixed-content patches (e.g., half LIVE, half DEAD) making it very subjective. The spectral and spatial inconsistencies were more complex at the patch level with the model failing to generalize across years.
 
 ---
 
-<br>
-### **Summary**
-
-| Metric                    | Result           |
-| ------------------------- | ---------------- |
-| In-year Accuracy          | ~65–70%          |
-| Cross-year Generalization | ❌ Failed (<50%) |
-| Label Noise               | High             |
+| Metric                    | Result        |
+| ------------------------- | ------------- |
+| In-year Accuracy          | ~65–70%       |
+| Cross-year Generalization | Failed (<50%) |
+| Label Noise               | High          |
 
 ---
 
-<br>
-### **Key Takeaways**
-
-- **Visual labeling ≠ repeatable** at scale
-- Patches blur meaningful distinctions
-- Spectral models must **anchor on spatial precision**
-- RGB features alone cannot reliably detect long-term changes
+### **Single Pixel Temporal Classification**
 
 ---
 
-<br>
-### **Transition to Next Phase**
-
-To resolve both spectral and spatial instability, we transitioned to **pixel-level temporal modeling** — tracking **individual pixels across all years**. That's the focus of **Log 3**.
+To resolve both spectral and spatial instability, I transitioned to **pixel-level temporal modeling** — tracking **individual pixels across all years** and use their **temporal NDVI trajectories** to classify them into ecological categories (LIVE, DEAD, BARE). With this approach, I now gain control over exact spatial location and can detect transitions across years. I also included NDVI data as part of the labeling strategy.
 
 ---
 
-<br>
-## **Log 3: Single Pixel Temporal Classification**
-
-<br>
-### **Research Goal**
-
-Track **individual pixels** over time and use their **temporal NDVI trajectories** to classify them into ecological categories (LIVE, DEAD, BARE).
+#### **Sample Outputs**
 
 ---
-
-<br>
-### **Phase 3 Approach — Per-Pixel Temporal NDVI Classifier**
-
-We moved away from patches and bounding boxes entirely. Each pixel became its own data point, tracked across all available years.
-
----
-
-<br>
-### **Thought Process**
-
-- Control exact **spatial location**
-- Use **temporal signal** as primary feature (e.g., NDVI over time)
-- Detect transitions like LIVE → DEAD or DEAD → BARE
-- Label using **human-in-the-loop hints** supported by NDVI
-
----
-
-<br>
-### **Methodology**
-
-##### 1. **Pixel Extraction**
-
-- Spatially aligned tiles across years (2014–2022)
-- Pixels indexed by `row`, `col`
-- Each pixel assigned time-series NDVI values:
-
-  ```
-  filename,row,col,year,ndvi,label_hint
-  r327_c59_y2020.png,327,59,2020,0.162,"possibly BARE or DEAD"
-
-  ```
-
-##### 2. **Labeling Strategy**
-
-- Combined:
-  - Visual inspection across years
-  - NDVI pattern (e.g., drop then flatten)
-  - Human-annotated hints like "likely DEAD"
-
-##### 3. **Model Input**
-
-- Each training sample: NDVI vector across years
-  ```
-  [0.58 (2014), 0.56 (2016), 0.44 (2018), 0.23 (2020), 0.22 (2022)]
-  → label: DEAD
-  ```
-
----
-
-<br>
-### **Sample Outputs**
 
 <div class="row mt-3">
     <div class="col-sm mt-3 mt-md-0">
@@ -359,32 +155,15 @@ We moved away from patches and bounding boxes entirely. Each pixel became its ow
 </div>
 ---
 
-<br>
-### **Key Strengths**
-
-- True **temporal stability** — fixed pixel over time
-- Model can **learn transitions**, not just snapshot classes
-- Eliminates resolution-induced mapping drift
+The benefits of this approach were multifold. Now, I can solve for spectral inconsistencies and apply spatial registration corrections to study transitions with high accuracy.
 
 ---
-
-<br>
-### **Experimental Insights**
-
-- Temporal modeling removes much spatial noise
-- NDVI change patterns (drop + flatten) correlate well with true mortality
-- Model interpretability improves (you can "see" what happened)
-
----
-
-<br>
-### **Current Status**
 
 | Metric                    | Result                                             |
 | ------------------------- | -------------------------------------------------- |
-| Temporal NDVI consistency | ✅ Strong                                          |
-| Human label quality       | ✅ High confidence                                 |
-| Class balance             | ⚠️ Still tuning                                    |
+| Temporal NDVI consistency | Strong                                             |
+| Human label quality       | High confidence                                    |
+| Class balance             | Still tuning                                       |
 | Next step                 | Expand labeled samples & train temporal classifier |
 
 ---
