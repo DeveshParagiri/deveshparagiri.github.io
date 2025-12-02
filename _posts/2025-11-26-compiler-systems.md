@@ -9,6 +9,7 @@ related_posts: false
 giscus_comments: false
 published: true
 typograms: true
+pseudocode: true
 ---
 
 _On meta-systems, intermediate representations, and why agent simulation is a code generation problem_
