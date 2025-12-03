@@ -21,7 +21,7 @@ social: false
 - applied ai research @ [gel](https://gel.umd.edu/) under [Dr. George Hurtt](https://scholar.google.com/citations?user=wr0aDMEAAAAJ&hl=en)
 
 - **recently:**
-  - **[radal](https://radal.ai/)** - cursor for finetuning
+  - **[radal](https://x.com/devparagiri/status/1951312130889891974?s=20)** - cursor for finetuning
   - **[notes0](https://www.notes0.app/)** - voice-enabled whiteboard
   - **[image2thing](https://x.com/devparagiri/status/1932506746297172437)** - ai agent for 3D modeling
   - **[buildme](https://github.com/DeveshParagiri/buildme)** - ai cli tool for zsh
