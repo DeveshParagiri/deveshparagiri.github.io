@@ -22,7 +22,7 @@ social: false
 
 - **recently:**
   - **[radal](https://x.com/devparagiri/status/1951312130889891974?s=20)** - cursor for finetuning
-  - **[notes0](https://www.notes0.app/)** - voice-enabled whiteboard
+  - **[notes0](https://x.com/divdotdev/status/1973382562258047470?s=20)** - voice-enabled whiteboard
   - **[image2thing](https://x.com/devparagiri/status/1932506746297172437)** - ai agent for 3D modeling
   - **[buildme](https://github.com/DeveshParagiri/buildme)** - ai cli tool for zsh
   - **[gitprobe](https://x.com/devparagiri/status/1937247576782414051)** - repo visualization tool for LLMs (**[#23 on PH](https://www.producthunt.com/products/gitprobe)**)
