@@ -7,7 +7,7 @@ tags: ai
 categories: code
 related_posts: false
 giscus_comments: false
-published: true
+published: false
 typograms: true
 pseudocode: true
 ---
