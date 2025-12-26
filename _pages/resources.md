@@ -7,6 +7,8 @@ published: true
 nav_order: 3
 ---
 
+- [deepseek tutorial](https://youtu.be/5avSMc79V-w?si=HGEDyKaguExm3P-2) - code deepseek from scratch
+- [llm 0-1](https://www.youtube.com/watch?v=Q86qzJ1K1Ss&list=PLoROMvodv4rObv1FMizXqumgVVdzX4_05) - only course i recommend
 - [robogen-ai](https://robogen-ai.github.io/) - interesting paper
 - [genesis-ai/genesis](https://github.com/Genesis-Embodied-AI/Genesis) - mujoco on roids
 - [nav.al](https://nav.al/) – food for thought
