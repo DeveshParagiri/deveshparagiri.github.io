@@ -21,7 +21,7 @@ social: false
 - applied ai research @ [gel](https://gel.umd.edu/) under [Dr. George Hurtt](https://scholar.google.com/citations?user=wr0aDMEAAAAJ&hl=en)
 
 - **recently:**
-  - **[entropy](https://github.com/exaforge/entropy)** - predictive intelligence through agent-based population simulation
+  - **[extropy](https://extropy.run)** - predictive intelligence through agent-based population simulation
   - **[wysiwyg](https://github.com/deveshparagiri/wysiwyg)** - CLI tool to detect hidden prompt injections
   - **[radal](https://x.com/devparagiri/status/1951312130889891974?s=20)** - cursor for finetuning
   - **[notes0](https://x.com/divdotdev/status/1973382562258047470?s=20)** - voice-enabled whiteboard
