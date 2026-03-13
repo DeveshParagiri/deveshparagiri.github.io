@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LSM vs LPM — Architecture Comparison</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0e0e10;
+  --surface: #18181b;
+  --surface2: #1e1e22;
+  --border: #2a2a2e;
+  --border-hi: #3a3a3e;
+  --text: #e4e4e7;
+  --text-muted: #8b8b94;
+  --text-dim: #5c5c64;
+  --accent: #6d9fff;
+  --accent-dim: #3a5a8a;
+  --warn: #e87c5a;
+  --warn-dim: #8a4a33;
+  --tag-lpm-bg: #1a2a1a;
+  --tag-lpm-text: #6abf6a;
+  --tag-lsm-bg: #1a1a2e;
+  --tag-lsm-text: #8a8adf;
+  --section-accent: #4a4a5a;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 40px 24px 60px;
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+header {
+  margin-bottom: 48px;
+  padding-bottom: 32px;
+  border-bottom: 1px solid var(--border);
+}
+
+h1 {
+  font-family: 'Source Serif 4', serif;
+  font-weight: 600;
+  font-size: 28px;
+  letter-spacing: -0.5px;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.subtitle {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.subtitle span {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  margin: 0 2px;
+}
+
+.tag-lpm { background: var(--tag-lpm-bg); color: var(--tag-lpm-text); }
+.tag-lsm { background: var(--tag-lsm-bg); color: var(--tag-lsm-text); }
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 36px 0 2px;
+  padding: 0;
+}
+
+.section-header::before {
+  content: '';
+  width: 3px;
+  height: 16px;
+  background: var(--accent-dim);
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.section-header h2 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-muted);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+thead th {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 2;
+}
+
+thead th:first-child { width: 20%; }
+thead th:nth-child(2), thead th:nth-child(3) { width: 40%; }
+
+td {
+  padding: 14px 16px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+td:first-child {
+  font-weight: 500;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+tr:last-child td { border-bottom: none; }
+
+tr:hover td {
+  background: var(--surface);
+}
+
+.section-row td {
+  padding: 36px 16px 8px;
+  border-bottom: 1px solid var(--border-hi);
+  background: none !important;
+}
+
+.section-row td:first-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-row td:first-child::before {
+  content: '';
+  width: 3px;
+  height: 14px;
+  background: var(--accent-dim);
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.section-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-muted);
+}
+
+.hi {
+  color: var(--warn);
+  font-weight: 500;
+}
+
+.lo {
+  color: var(--text-dim);
+}
+
+.note {
+  color: var(--accent);
+  font-style: italic;
+}
+
+em {
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.footer {
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+@media (max-width: 700px) {
+  body { padding: 24px 12px; font-size: 13px; }
+  h1 { font-size: 22px; }
+  td, thead th { padding: 10px 8px; font-size: 12.5px; }
+  thead th:first-child { width: 25%; }
+  thead th:nth-child(2), thead th:nth-child(3) { width: 37.5%; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>LSM vs LPM — Architecture comparison</h1>
+  <p class="subtitle">
+    <span class="tag-lpm">LPM</span> Large Population Models / AgentTorch (Project Iceberg) &nbsp;&middot;&nbsp;
+    <span class="tag-lsm">LSM</span> Large Societal Model (Extropy)
+  </p>
+</header>
+
+<table>
+<thead>
+  <tr><th>Dimension</th><th>LPM / AgentTorch</th><th>LSM (Extropy)</th></tr>
+</thead>
+<tbody>
+
+<tr class="section-row"><td colspan="3"><span class="section-label">Core paradigm</span></td></tr>
+
+<tr>
+  <td>What it is</td>
+  <td>An evolution beyond traditional ABMs. Combines a composable DSL (FLAME) for multi-paradigm dynamics, GPU-parallel tensorized execution, differentiable simulation for gradient-based calibration, and privacy-preserving protocols for bidirectional feedback between simulated and physical agents. Designed to fix the fidelity and calibration limitations of classical ABMs.</td>
+  <td>Learned neural simulation engine. A transformer where agents are tokens and the social graph is the attention mask. Rules are learned from LLM traces, not hand-coded.</td>
+</tr>
+<tr>
+  <td>Agent behavior source</td>
+  <td>Researcher-specified but learnable. Transition rules are authored via a composable DSL, but parameters are calibrated from real-world data via gradient-based optimization (not hand-tuned). Supports neural network components within substeps (e.g., learned mobility patterns), so behavior can be a mix of explicit rules and learned functions.</td>
+  <td>Distilled from frontier LLM reasoning traces. The transition function is learned end-to-end, not authored.</td>
+</tr>
+<tr>
+  <td>Role of LLMs</td>
+  <td>Pipeline utility in Iceberg (LLMs map AI tools to BLS skill taxonomies). More broadly, LPMs can incorporate neural network components within substeps but do not use LLMs as the agent reasoning engine. Chopra explicitly argues LLMs are not the solution for population-scale AI.</td>
+  <td>Three roles: (1) generate training data (full per-agent reasoning traces), (2) ground-truth baseline for validation, (3) narrate traces on demand post-simulation. Agents don't call LLMs at runtime either.</td>
+</tr>
+
+<tr class="section-row"><td colspan="3"><span class="section-label">Agent representation</span></td></tr>
+
+<tr>
+  <td>Agent state</td>
+  <td>Rich attribute vector per agent (~150K attributes in Iceberg: skills, tasks, occupation, location, income, education, work values). Agent properties are tensorized for GPU-parallel processing. State updates are composable across multiple modeling paradigms (discrete-time, continuous-time, neural, discrete-event) within a single simulation step. No explicit "reasoning" state, but agent heterogeneity is high-dimensional.</td>
+  <td>Rich hybrid state: static identity embedding + dynamic reasoning state (anchored mechanism channels + free latent space) + dual memory (recurrent summary + episodic buffer) + expression vector + decision state.</td>
+</tr>
+<tr>
+  <td>Reasoning traces</td>
+  <td><span class="lo">Not per-agent cognitive traces.</span> Outputs are population-level metrics and distributions. However, agent-level state is tracked (attributes, group membership) and gradient-based sensitivity analysis can identify which parameters most affect outcomes, providing a different kind of "why."</td>
+  <td><span class="hi">Core product.</span> Per-agent, per-timestep traces stored as structured tensors. Anchored dimensions (trust, fairness, social proof, etc.) are directly readable. Free latent space recoverable via probing.</td>
+</tr>
+<tr>
+  <td>Memory</td>
+  <td>Depends on application. The DSL supports stateful agents with temporal dynamics (e.g., epidemiological exposure history). Iceberg's workforce model is more snapshot-oriented. Memory is possible but researcher-designed, not learned.</td>
+  <td>Dual: GRU-style recurrent summary (compressed trajectory) + episodic buffer (20–50 salient events, content-addressed retrieval). Enables path dependence.</td>
+</tr>
+
+<tr class="section-row"><td colspan="3"><span class="section-label">Social dynamics</span></td></tr>
+
+<tr>
+  <td>Network model</td>
+  <td>Agents interact across geographic and occupational networks at multiple scales (individual, household, neighborhood, city). Interaction dynamics are composable and tensorized. In Iceberg specifically, interactions are skill-overlap computations. In other LPM applications (epidemiology), agents interact via contact networks with explicit transmission dynamics.</td>
+  <td>Typed social graph (household, friend, professional, weak tie, media). Graph-masked multi-head attention. Each agent attends only to connected neighbors. Edge type modulates attention via learned embeddings.</td>
+</tr>
+<tr>
+  <td>Inter-agent influence</td>
+  <td>Depends on application. Can range from aggregated population-level dynamics (Iceberg: technology readiness, adoption curves) to explicit agent-to-agent transmission (epidemiology: contact-network infection). The DSL supports both. Influence mechanisms are researcher-specified but calibrated from data.</td>
+  <td>Per-pair: agents broadcast lossy expression vectors. Receivers integrate signals through identity-conditioned attention. Same signal, different effect on different observers. Optional per-pair trust evolution.</td>
+</tr>
+
+<tr class="section-row"><td colspan="3"><span class="section-label">Simulation mechanics</span></td></tr>
+
+<tr>
+  <td>Forward pass</td>
+  <td>Tensorized differentiable step function over all agents. GPU-parallel. Supports backprop through the full simulation for online gradient-based parameter estimation, unlike traditional ABMs that require offline surrogate-model calibration. Composable substeps can mix differential equations, neural networks, and discrete-event logic in a single timestep.</td>
+  <td>Single transformer forward pass = one timestep for entire population. Batched, deterministic. No autoregressive generation.</td>
+</tr>
+<tr>
+  <td>Differentiability</td>
+  <td><span class="hi">Yes, end-to-end.</span> Core innovation over traditional ABMs. Enables online gradient-based calibration directly against real-world data streams (career transitions, adoption patterns, epidemiological data). No offline surrogate model needed. One-shot sensitivity analysis via automatic differentiation (vs. thousands of Monte Carlo runs in classical ABMs).</td>
+  <td>Not emphasized. Trained via distillation losses against LLM traces, not by backprop through the simulation itself at inference.</td>
+</tr>
+<tr>
+  <td>Scenario input</td>
+  <td>Structured parameters: technology readiness levels, adoption assumptions, policy interventions, regional variation. Adjusted by the researcher.</td>
+  <td>Rich structured timeline: events with source type, channel, framing, emotional valence, credibility signal, exposure masks. Supports endogenous events triggered by population-level thresholds.</td>
+</tr>
+
+<tr class="section-row"><td colspan="3"><span class="section-label">Outputs</span></td></tr>
+
+<tr>
+  <td>Primary output</td>
+  <td>Quantitative indices (Iceberg Index, Surface Index), geographic distributions, industry concentration scores (HHI), adoption curves.</td>
+  <td>Per-agent reasoning state trajectories, cluster-level reasoning profiles, counterfactual diffs, intervention surfaces. Quantitative outcomes are secondary reads from the reasoning state.</td>
+</tr>
+<tr>
+  <td>Interpretability</td>
+  <td>Index-level: what percentage of wage value is exposed. No per-agent "why."</td>
+  <td>Two-layer: (1) anchored dimensions are the computation itself (hard traceability), (2) axis recovery on free latent space via linear probing (soft traceability). Plus attention weights and memory events.</td>
+</tr>
+<tr>
+  <td>Narration</td>
+  <td>None. Results are statistical/geographic.</td>
+  <td>On-demand LLM narration from structured traces. First-person agent narratives grounded in computational record.</td>
+</tr>
+
+<tr class="section-row"><td colspan="3"><span class="section-label">Scale &amp; validation</span></td></tr>
+
+<tr>
+  <td>Population scale</td>
+  <td>151M agents demonstrated (Iceberg). Runs on Frontier supercomputer (ORNL). Validated across domains: epidemiology (COVID vaccine policy, published in BMJ), biosecurity, supply chain resilience. Designed for national-to-global scale.</td>
+  <td>Targets 10K–1M agents. 10K in seconds, 1M at edge of current GPU capacity. Scenario-level simulations, not census-level coverage.</td>
+</tr>
+<tr>
+  <td>Validation</td>
+  <td>Multi-domain empirical validation. Iceberg: 85% recall on career transition prediction, 69% geographic agreement with Anthropic Economic Index. Epidemiology: policy-relevant results published in BMJ (COVID vaccine dosing). Gradient-based calibration enables continuous refinement against streaming real-world data.</td>
+  <td>Against LLM baseline: decision distributions, reasoning cluster structure, tail survival. Empirical calibration where survey/polling data exists. No published validation yet.</td>
+</tr>
+<tr>
+  <td>Maturity</td>
+  <td>Deployed and published across multiple domains. Running on Frontier. Real policy engagement (NC General Assembly, Utah AI Office). Multiple AAMAS orals, ICML Best Paper Award, BMJ publication. AgentTorch is open-source.</td>
+  <td>Design document stage. Architecture specified, not yet trained or validated.</td>
+</tr>
+
+<tr class="section-row"><td colspan="3"><span class="section-label">Key limitation</span></td></tr>
+
+<tr>
+  <td>What it can't do</td>
+  <td>Agent behavior is still researcher-authored at the structural level (even if parameters are learned). Cannot surface reasoning pathways the researcher didn't encode as substeps. No per-agent reasoning traces or cognitive interpretability. Powerful at "what happens" and "how much," limited at "why this person specifically."</td>
+  <td>Cannot match LPM's population scale (151M). No differentiability for direct parameter estimation. Reasoning fidelity bounded by distillation quality from LLM traces (unproven).</td>
+</tr>
+
+</tbody>
+</table>
+
+<div class="footer">Internal reference — Dev, March 2026</div>
+
+</body>
+</html>
