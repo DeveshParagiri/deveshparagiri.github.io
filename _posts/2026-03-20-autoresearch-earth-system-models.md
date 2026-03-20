@@ -6,7 +6,7 @@ description: Using LLMs to systematically diagnose and replace parameterized for
 tags: ai, research, earth-science
 categories: code
 related_posts: false
-giscus_comments: true
+giscus_comments: false
 published: true
 pretty_table: true
 ---
