@@ -14,62 +14,59 @@ authors:
       name: University of Maryland
 bibliography: 2026-03-20-autoresearch-earth-system-models.bib
 
+toc:
+  - name: Physical Grounding as a Design Constraint
+  - name: The Autoresearch Loop
+  - name: Following the Dependency Graph
+  - name: Fire and the Intermediate Productivity Hypothesis
+  - name: Decomposition and the Cold Soil Problem
+  - name: Closing the Water Balance
+  - name: The Vegetation Coverage Gap
+  - name: Summary of Ecological Changes
+  - name: Limitations and Generalization
+
 ---
 
 Inspired in part by Karpathy's [autoresearch](https://github.com/karpathy/autoresearch) framework for LLM-driven scientific discovery, we apply the idea to a domain where the formulas are grounded in physics and the observations are global. Earth system models simulate plant growth, fire, soil carbon cycling, and water fluxes globally. They contain hundreds of parameterized formulas governing these processes, many of which have remained structurally unchanged since their original publications in the 1980s and 1990s. Tuning the parameters of these formulas is the standard approach to model improvement, and it assumes the underlying equation is correct. In this work, we describe an autoresearch methodology that uses LLMs to systematically evaluate whether the formula _structure itself_ should be replaced, searching the joint space of equations and parameters against observational benchmarks, and maintaining physical interpretability throughout.
 
 We applied this methodology to the [Ecosystem Demography model (ED v3.0)](https://gmd.copernicus.org/articles/15/1971/2022/) <d-cite key="ma2022ed"></d-cite>, an individual-based terrestrial biosphere model used for carbon cycle projections and land-use change studies. ED simulates every tree and grass cohort globally, computing photosynthesis, growth, mortality, phenology, soil carbon decomposition, hydrology, and fire disturbance at each timestep. The [International Land Model Benchmarking project (iLAMB)](https://www.ilamb.org/) <d-cite key="collier2018ilamb"></d-cite> evaluates ED against 21 other models in the [TRENDY/GCB](https://globalcarbonbudget.org/) ensemble.
 
----
-
 ### Physical Grounding as a Design Constraint
 Every formula proposed by the autoresearch system must correspond to a named physical process with published justification. Lloyd-Taylor <d-cite key="lloyd1994temperature"></d-cite> for the temperature dependence of enzyme kinetics near freezing. Budyko <d-cite key="budyko1974climate"></d-cite> for water-energy partitioning at the catchment scale. Monteith <d-cite key="monteith1972solar"></d-cite> for the proportionality between intercepted radiation and plant growth. Hargreaves and Samani <d-cite key="hargreaves1985reference"></d-cite> for estimating evaporative demand from diurnal temperature range. Zhang et al. <d-cite key="zhang2001response"></d-cite> for the vegetation-dependent partitioning of precipitation into evapotranspiration and runoff.
 
 The LLM serves as a diagnostic engine, drawing on the ecological and biogeochemical literature to identify structural mismatches between model assumptions and observed spatial patterns. All formulas are expressed in basic arithmetic operations (exponential, logarithm, power, conditionals) and must be portable to the model's native C++ implementation. This constraint excludes neural networks, learned embeddings, and any representation that cannot be interpreted in terms of a physical mechanism.
 
----
 ### The Autoresearch Loop
 
 The methodology follows a systematic cycle applied to each model module. The parameterized formula is extracted from the model's C++ source and replicated in Python, enabling fast evaluation over the global 0.5° grid (~1 second per evaluation). The Python replica is compared against gridded observational datasets ([HWSD](https://www.fao.org/soils-portal/data-hub/soil-maps-and-databases/harmonized-world-soil-database-v12/en/) for soil carbon, [GLEAM](https://www.gleam.eu/) for evapotranspiration, [GFED](https://www.globalfiredata.org/) for burned area, [FLUXCOM](https://www.fluxcom.org/) for gross primary productivity, [MODIS](https://modis.gsfc.nasa.gov/) for leaf area index, [LORA](https://geonetwork.nci.org.au/geonetwork/srv/eng/catalog.search#/metadata/f9617_9854_8096_5291) for runoff). The LLM then diagnoses _why_ the model disagrees with observations, drawing on physical reasoning to propose structural alternatives organized along defined axes.
 
----
 <div class="row mt-3">
     <div class="col-sm mt-3 mt-md-0">
         {% include figure.liquid loading="eager" path="assets/img/autoresearch_ed/autoresearch_loop.png" class="img-fluid rounded z-depth-1" zoomable=true %}
     </div>
 </div>
 
----
 Each axis represents a dimension of the formula's physical assumptions. For soil carbon decomposition, the axes include: (1) the temperature response function (Q10 vs. Lloyd-Taylor vs. Arrhenius vs. bell-curve), (2) the moisture response function (piecewise linear vs. log-parabolic vs. Michaelis-Menten with anaerobic suppression), (3) the pool structure (4-pool CENTURY vs. 3-pool vs. 2-pool), and (4) additional input variables (vegetation cover effects on soil temperature). Each alternative on each axis corresponds to a published model or physical mechanism.
 
 The search over this combinatorial space of structures, combined with continuous parameter optimization within each structure, is performed using Bayesian optimization. Specifically, we use the [Tree-structured Parzen Estimator (TPE)](https://papers.nips.cc/paper/2011/hash/86e8f7ab32cfd12577bc2619bc635690-Abstract.html) <d-cite key="bergstra2011tpe"></d-cite> implemented in [Optuna](https://optuna.org/). TPE is a sequential model-based optimization algorithm that builds separate probability models of the parameter space for "good" and "bad" trials, then samples new trial points that maximize the ratio of these densities. This makes it efficient in mixed search spaces (categorical structural choices combined with continuous parameters) and practical at budgets of 500-2000 evaluations per module.
 
 Each module receives a tailored multi-metric objective function reflecting what matters ecologically. Spatial correlation alone is insufficient. For hydrology, the objective includes water balance closure (precipitation must equal evapotranspiration plus runoff). For soil carbon, both stock accuracy (against HWSD) and flux accuracy (against Hashimoto et al. <d-cite key="hashimoto2015soil"></d-cite> heterotrophic respiration) are weighted equally, with a bias penalty. For gross primary productivity, biome-level skill is weighted alongside global correlation, because a model that concentrates all productivity in the tropics while producing zero in boreal forests provides a misleading global mean.
 
----
-
 ### Following the Dependency Graph
 
 The modules in ED form a directed dependency graph. Climate forcing drives photosynthesis, which feeds growth and hydrology. Hydrology governs soil moisture, which feeds back to phenology and soil carbon decomposition. Litter from growth and mortality enters the soil carbon pools. Fire is downstream of all other processes, depending on fuel load (biomass), fuel moisture (dryness), and seasonal productivity (GPP).
 
----
 <div class="row mt-3">
     <div class="col-sm mt-3 mt-md-0">
         {% include figure.liquid loading="eager" path="assets/img/autoresearch_ed/dependency_graph.png" class="img-fluid rounded z-depth-1" zoomable=true %}
     </div>
 </div>
 
----
-
 This dependency structure determined our optimization order and revealed constraints that single-module optimization would miss. An improvement to the photosynthesis module cascades to better litter input estimates, which in turn affect soil carbon predictions. Evapotranspiration and runoff share water balance as a conservation law: they cannot be optimized independently without risking physical inconsistency. We return to this cross-module consistency problem in a later section.
-
----
 
 ### Fire and the Intermediate Productivity Hypothesis
 
 The fire module provided the initial proof of concept for the autoresearch methodology. ED's original fire formula computed burned area as a power-law function of above-ground biomass and a dryness index:
-
----
 
 $$\text{fire} = \text{AGB} \times \left(\frac{\bar{D}}{\text{norm}}\right)^{\text{exp}}$$
 
@@ -208,11 +205,6 @@ Across the model, the autoresearch methodology produced five structural changes,
 | Phenology | MODIS | 0.76 | **0.80** | +0.04 |
 | Water Balance | P=ET+R | −81 mm/yr | **−3 mm/yr** | Closed |
 
-
-<br>
-
-----
-
 | Process | Original Formulation | Replacement | Physical Rationale |
 |---------|---------------------|-------------|-------------------|
 | Fire disturbance | Power-law (AGB × dryness) | Sigmoid × unimodal hump | Intermediate productivity hypothesis <d-cite key="pausas2013fire"></d-cite> |
@@ -221,13 +213,9 @@ Across the model, the autoresearch methodology produced five structural changes,
 | Soil carbon pools | 4-pool CENTURY | 2-pool (labile + stable) | Observations cannot constrain 4 pools; passive pool was inert |
 | Evapotranspiration | Penman-Monteith (hourly) | Hargreaves + Zhang Budyko | Vegetation-dependent water-energy partitioning |
 
----
-
 In every case, the largest gains came from changing the functional form of the equation, informed by ecological reasoning about the physical process, rather than from tuning parameters within the original formulation.
 
 Spatial cross-validation (5-fold, latitude-stratified) confirmed that the improvements generalize across regions: train-test correlation gaps were below 0.10 for 4 of 5 folds in all modules, with parameter counts of 2-11 against 50,000+ observation cells.
-
----
 
 ### Limitations and Generalization
 
@@ -236,4 +224,3 @@ The results presented here are based on steady-state approximations evaluated ag
 The steady-state assumption for soil carbon is particularly questionable at high latitudes, where permafrost soils are demonstrably out of equilibrium and contain vast carbon stocks that accumulated over millennia. The two-pool model cannot represent this legacy carbon without an explicit frozen-carbon mechanism. The boreal GPP problem, where no single formula adequately captures productivity across tropical, temperate, and boreal biomes simultaneously, remains partially addressed through the biome-blended approach but is fundamentally limited by the quality of the climate-based gap-fill at high latitudes.
 
 The methodology itself generalizes to any parameterized model in the geosciences or beyond. The requirements are: (1) a set of parameterized formulas with physical interpretability, (2) gridded observational targets for evaluation, (3) domain literature from which the LLM can draw structural alternatives, and (4) a fast evaluation pathway (~1 second per trial). The deliverable is always interpretable, portable, and physically defensible. The formulas are the hypothesis. The full model re-run is the experiment.
-
