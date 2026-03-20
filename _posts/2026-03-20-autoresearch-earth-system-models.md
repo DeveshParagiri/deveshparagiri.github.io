@@ -12,11 +12,13 @@ pretty_table: true
 mermaid:
   enabled: true
   zoomable: true
+chart:
+  echarts: true
 ---
 
 Earth system models simulate plant growth, fire, soil carbon cycling, and water fluxes globally. They contain hundreds of parameterized formulas governing these processes, many of which have remained structurally unchanged since their original publications in the 1980s and 1990s. Tuning the parameters of these formulas is the standard approach to model improvement, and it assumes the underlying equation is correct. In this work, we describe an autoresearch methodology that uses LLMs to systematically evaluate whether the formula _structure itself_ should be replaced, searching the joint space of equations and parameters against observational benchmarks, and maintaining physical interpretability throughout.
 
-We applied this methodology to the Ecosystem Demography model (ED v3.0; Ma et al. 2022), an individual-based terrestrial biosphere model used for carbon cycle projections and land-use change studies. ED simulates every tree and grass cohort globally, computing photosynthesis, growth, mortality, phenology, soil carbon decomposition, hydrology, and fire disturbance at each timestep. The International Land Model Benchmarking project (iLAMB; Collier et al. 2018) evaluates ED against 21 other models in the TRENDY/GCB ensemble.
+We applied this methodology to the [Ecosystem Demography model (ED v3.0)](https://gmd.copernicus.org/articles/15/1971/2022/) (Ma et al. 2022), an individual-based terrestrial biosphere model used for carbon cycle projections and land-use change studies. ED simulates every tree and grass cohort globally, computing photosynthesis, growth, mortality, phenology, soil carbon decomposition, hydrology, and fire disturbance at each timestep. The [International Land Model Benchmarking project (iLAMB)](https://www.ilamb.org/) (Collier et al. 2018) evaluates ED against 21 other models in the [TRENDY/GCB](https://globalcarbonbudget.org/) ensemble.
 
 ---
 
@@ -30,23 +32,23 @@ The LLM serves as a diagnostic engine, drawing on the ecological and biogeochemi
 
 ### The Autoresearch Loop
 
-The methodology follows a systematic cycle applied to each model module. The parameterized formula is extracted from the model's C++ source and replicated in Python, enabling fast evaluation over the global 0.5° grid (~1 second per evaluation). The Python replica is compared against gridded observational datasets (HWSD for soil carbon, GLEAM for evapotranspiration, GFED for burned area, FLUXCOM for gross primary productivity, MODIS for leaf area index, LORA for runoff). The LLM then diagnoses _why_ the model disagrees with observations, drawing on physical reasoning to propose structural alternatives organized along defined axes.
+The methodology follows a systematic cycle applied to each model module. The parameterized formula is extracted from the model's C++ source and replicated in Python, enabling fast evaluation over the global 0.5° grid (~1 second per evaluation). The Python replica is compared against gridded observational datasets ([HWSD](https://www.fao.org/soils-portal/data-hub/soil-maps-and-databases/harmonized-world-soil-database-v12/en/) for soil carbon, [GLEAM](https://www.gleam.eu/) for evapotranspiration, [GFED](https://www.globalfiredata.org/) for burned area, [FLUXCOM](https://www.fluxcom.org/) for gross primary productivity, [MODIS](https://modis.gsfc.nasa.gov/) for leaf area index, [LORA](https://geonetwork.nci.org.au/geonetwork/srv/eng/catalog.search#/metadata/f9617_9854_8096_5291) for runoff). The LLM then diagnoses _why_ the model disagrees with observations, drawing on physical reasoning to propose structural alternatives organized along defined axes.
 
 ```mermaid
-flowchart LR
-    A["Extract Formula\nfrom C++ source"] --> B["Replicate in Python\n~1s per global grid"]
-    B --> C["Evaluate vs\nObservations"]
-    C --> D["LLM Diagnosis\nwhy does it fail?"]
-    D --> E["Propose Alternatives\nalong physical axes"]
-    E --> F["Bayesian Search\nstructure × params"]
-    F --> G["Validate\ncross-validation"]
-    G --> H["C++ Replacement"]
+flowchart TD
+    A["Extract Formula from C++ source"] --> B["Replicate in Python\n~1s per global grid"]
+    B --> C["Evaluate vs Observations\niLAMB benchmarks"]
+    C --> D["LLM Diagnosis\nwhy does the formula\ndisagree with observations?"]
+    D --> E["Propose Structural Alternatives\nalong physical axes"]
+    E --> F["Bayesian Search\nstructure × parameters\n500-2000 trials"]
+    F --> G["Validate\nspatial cross-validation"]
+    G --> H["C++ Replacement\nportable formula"]
     H -.->|iterate| C
 ```
 
 Each axis represents a dimension of the formula's physical assumptions. For soil carbon decomposition, the axes include: (1) the temperature response function (Q10 vs. Lloyd-Taylor vs. Arrhenius vs. bell-curve), (2) the moisture response function (piecewise linear vs. log-parabolic vs. Michaelis-Menten with anaerobic suppression), (3) the pool structure (4-pool CENTURY vs. 3-pool vs. 2-pool), and (4) additional input variables (vegetation cover effects on soil temperature). Each alternative on each axis corresponds to a published model or physical mechanism.
 
-The search over this combinatorial space of structures, combined with continuous parameter optimization within each structure, is performed using Bayesian optimization. Specifically, we use the Tree-structured Parzen Estimator (TPE; Bergstra et al. 2011) implemented in Optuna. TPE is a sequential model-based optimization algorithm that builds separate probability models of the parameter space for "good" and "bad" trials, then samples new trial points that maximize the ratio of these densities. This makes it efficient in mixed search spaces (categorical structural choices combined with continuous parameters) and practical at budgets of 500-2000 evaluations per module.
+The search over this combinatorial space of structures, combined with continuous parameter optimization within each structure, is performed using Bayesian optimization. Specifically, we use the [Tree-structured Parzen Estimator (TPE)](https://papers.nips.cc/paper/2011/hash/86e8f7ab32cfd12577bc2619bc635690-Abstract.html) (Bergstra et al. 2011) implemented in [Optuna](https://optuna.org/). TPE is a sequential model-based optimization algorithm that builds separate probability models of the parameter space for "good" and "bad" trials, then samples new trial points that maximize the ratio of these densities. This makes it efficient in mixed search spaces (categorical structural choices combined with continuous parameters) and practical at budgets of 500-2000 evaluations per module.
 
 Each module receives a tailored multi-metric objective function reflecting what matters ecologically. Spatial correlation alone is insufficient. For hydrology, the objective includes water balance closure (precipitation must equal evapotranspiration plus runoff). For soil carbon, both stock accuracy (against HWSD) and flux accuracy (against Hashimoto et al. 2015 heterotrophic respiration) are weighted equally, with a bias penalty. For gross primary productivity, biome-level skill is weighted alongside global correlation, because a model that concentrates all productivity in the tropics while producing zero in boreal forests provides a misleading global mean.
 
@@ -80,7 +82,7 @@ The fire module provided the initial proof of concept for the autoresearch metho
 
 $$\text{fire} = \text{AGB} \times \left(\frac{\bar{D}}{\text{norm}}\right)^{\text{exp}}$$
 
-This formulation assumes that fire risk increases monotonically with fuel load and dryness. Evaluation against GFED4.1s burned area (Randerson et al. 2017) yielded a spatial correlation of r = 0.09, effectively no skill.
+This formulation assumes that fire risk increases monotonically with fuel load and dryness. Evaluation against [GFED4.1s](https://www.globalfiredata.org/) burned area (Randerson et al. 2017) yielded a spatial correlation of r = 0.09, effectively no skill.
 
 The LLM diagnosis identified a well-documented ecological pattern that the formula structure fails to capture: fire occurrence peaks at intermediate levels of productivity (Pausas & Ribeiro 2013). Savannas burn frequently because they produce sufficient fuel during the wet season that cures during the dry season. Closed-canopy rainforests rarely burn because high humidity prevents fuel drying. Deserts and sparse shrublands lack fuel entirely. This intermediate productivity hypothesis requires a _unimodal_ response to biomass, which a monotonically increasing power law cannot represent.
 
@@ -100,7 +102,7 @@ This structural change, from a monotonic to a unimodal response, was the primary
 
 ### Decomposition and the Cold Soil Problem
 
-ED's soil carbon decomposition follows a simplified CENTURY model (Parton et al. 1993) with four carbon pools (structural, fast, slow, passive) and a decomposition scalar that combines temperature and moisture effects:
+ED's soil carbon decomposition follows a simplified [CENTURY model](https://www2.nrel.colostate.edu/projects/century/) (Parton et al. 1993) with four carbon pools (structural, fast, slow, passive) and a decomposition scalar that combines temperature and moisture effects:
 
 $$T_d = R_0 \cdot Q_{10}^{(T - 25)/10}, \quad W_d = \text{piecewise}(\theta; 0.3, 0.6)$$
 
@@ -136,7 +138,7 @@ The optimized moisture parameter $$\sigma = 3.7$$ is very wide, indicating that 
 
 We further simplified the four-pool CENTURY structure to a two-pool model (labile and stable carbon). The four-pool structure includes a passive pool that in ED is completely inert (decay rate K4 = 0, respiration fraction r = 0), meaning carbon enters but never leaves. Observational datasets (HWSD, NCSCD) report total soil carbon stocks and cannot constrain individual pool fractions. The two-pool structure avoids overfitting while representing the essential distinction between rapidly cycling litter carbon (turnover ~600 days) and slowly cycling humus (turnover ~115 years).
 
-The global soil carbon bias decreased from −50% to effectively zero. Spatial correlation against HWSD improved from 0.43 to 0.48. At high latitudes, correlation against the Northern Circumpolar Soil Carbon Database (NCSCD; Hugelius et al. 2014) improved from 0.11 to 0.19 after incorporating a vegetation gap-fill (discussed below).
+The global soil carbon bias decreased from −50% to effectively zero. Spatial correlation against HWSD improved from 0.43 to 0.48. At high latitudes, correlation against the [Northern Circumpolar Soil Carbon Database (NCSCD)](https://bolin.su.se/data/ncscd/) (Hugelius et al. 2014) improved from 0.11 to 0.19 after incorporating a vegetation gap-fill (discussed below).
 
 ---
 
@@ -148,7 +150,7 @@ $$P = ET + R + \Delta S$$
 
 At the annual timescale, changes in storage ($$\Delta S$$) are approximately zero, so precipitation should equal evapotranspiration plus runoff. When ET and runoff are optimized against their respective observational targets (GLEAM and LORA) using independently chosen formulations, this constraint can be violated. We found an 81 mm/yr global residual when using separately optimized models.
 
-Joint optimization using a single ET formulation for both targets resolved this. We replaced ED's hourly Penman-Monteith scheme with the Hargreaves PET estimate (Hargreaves & Samani 1985) coupled to Zhang's vegetation-dependent Budyko curve (Zhang et al. 2001), partitioned between soil evaporation and canopy transpiration using Beer's law interception:
+Joint optimization using a single ET formulation for both targets resolved this. We replaced ED's hourly Penman-Monteith scheme with the [Hargreaves PET estimate](https://elibrary.asabe.org/abstract.asp?aid=26773) (Hargreaves & Samani 1985) coupled to Zhang's [vegetation-dependent Budyko curve](https://doi.org/10.1029/2000WR900325) (Zhang et al. 2001), partitioned between soil evaporation and canopy transpiration using Beer's law interception:
 
 $$\frac{ET}{P} = \frac{1 + w \cdot PET/P}{1 + w \cdot PET/P + P/PET}$$
 
@@ -164,7 +166,7 @@ Systematic evaluation across all modules revealed an unexpected finding: 22% of 
 
 This gap propagates through the entire dependency graph. Absent vegetation means zero litter input to the soil carbon module, zero transpiration in the hydrology module, and zero fuel for the fire module. It represents 19% of global soil carbon stocks as reported by HWSD, a substantial fraction rendered invisible to the model.
 
-We addressed this with a climate-based gap-fill model. For GPP, we used a light-use efficiency formulation (Running et al. 2004) driven by CRU TS temperature and precipitation. For LAI, we used a biome-blended model based on the Growing Season Index (Jolly et al. 2005), with separate sub-models for temperature-limited (boreal), water-limited (arid), and energy-limited (tropical) regimes. The gap-fill extended the model's land coverage by 30% and improved high-latitude soil carbon correlation (against NCSCD) by 76%.
+We addressed this with a climate-based gap-fill model. For GPP, we used a [light-use efficiency formulation](https://doi.org/10.1641/0006-3568(2004)054[0547:ACSMOG]2.0.CO;2) (Running et al. 2004) driven by [CRU TS](https://crudata.uea.ac.uk/cru/data/hrg/) temperature and precipitation. For LAI, we used a biome-blended model based on the [Growing Season Index](https://doi.org/10.1111/j.1365-2486.2005.00930.x) (Jolly et al. 2005), with separate sub-models for temperature-limited (boreal), water-limited (arid), and energy-limited (tropical) regimes. The gap-fill extended the model's land coverage by 30% and improved high-latitude soil carbon correlation (against NCSCD) by 76%.
 
 This finding illustrates a benefit of the autoresearch framework that extends beyond formula optimization. By forcing systematic evaluation of every module against gridded observations, systemic issues that span multiple modules become visible. The vegetation coverage gap was identifiable only by examining the intersection of soil carbon, ET, and GPP failures at the same grid cells.
 
@@ -184,6 +186,8 @@ Across the model, the autoresearch methodology produced five structural changes,
 | Runoff | LORA | 0.76 | **0.85** | +0.09 |
 | Phenology | MODIS | 0.76 | **0.80** | +0.04 |
 | Water Balance | P=ET+R | −81 mm/yr | **−3 mm/yr** | closed |
+
+<br>
 
 | Process | Original Formulation | Replacement | Physical Rationale |
 |---------|---------------------|-------------|-------------------|
