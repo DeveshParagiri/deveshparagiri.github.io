@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 312" font-family="'Inter', 'Helvetica Neue', sans-serif">
+  <defs>
+    <style>
+      .hdr { font-size: 11px; fill: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+      .cell { font-size: 12.5px; fill: #374151; }
+      .cell-bold { font-size: 12.5px; fill: #111827; font-weight: 600; }
+      .delta { font-size: 11.5px; font-weight: 600; }
+    </style>
+  </defs>
+  
+  <!-- Header -->
+  <rect x="0" y="0" width="620" height="36" fill="#f9fafb" rx="6"/>
+  <text x="30" y="22" class="hdr">Module</text>
+  <text x="170" y="22" class="hdr">Benchmark</text>
+  <text x="290" y="22" class="hdr">Before</text>
+  <text x="390" y="22" class="hdr">After</text>
+  <text x="500" y="22" class="hdr">Change</text>
+  
+  <!-- Rows -->
+  <rect x="0" y="36" width="620" height="32" fill="#fafafa"/>
+  <text x="30" y="57" class="cell-bold">Fire</text>
+  <text x="170" y="57" class="cell">GFED</text>
+  <text x="290" y="57" class="cell" fill="#9ca3af">0.09</text>
+  <text x="390" y="57" class="cell-bold">0.65</text>
+  <rect x="488" y="42" width="56" height="20" rx="10" fill="#dcfce7"/>
+  <text x="496" y="57" class="delta" fill="#166534">+0.56</text>
+  <text x="30" y="89" class="cell-bold">GPP</text>
+  <text x="170" y="89" class="cell">FLUXCOM</text>
+  <text x="290" y="89" class="cell" fill="#9ca3af">0.56</text>
+  <text x="390" y="89" class="cell-bold">0.73</text>
+  <rect x="488" y="74" width="56" height="20" rx="10" fill="#dbeafe"/>
+  <text x="496" y="89" class="delta" fill="#1e40af">+0.17</text>
+  <rect x="0" y="100" width="620" height="32" fill="#fafafa"/>
+  <text x="30" y="121" class="cell-bold">Soil Carbon</text>
+  <text x="170" y="121" class="cell">HWSD</text>
+  <text x="290" y="121" class="cell" fill="#9ca3af">0.43</text>
+  <text x="390" y="121" class="cell-bold">0.48</text>
+  <rect x="488" y="106" width="56" height="20" rx="10" fill="#dbeafe"/>
+  <text x="496" y="121" class="delta" fill="#1e40af">+0.05</text>
+  <text x="30" y="153" class="cell-bold">Soil C bias</text>
+  <text x="170" y="153" class="cell">HWSD</text>
+  <text x="290" y="153" class="cell" fill="#9ca3af">−50%</text>
+  <text x="390" y="153" class="cell-bold">0%</text>
+  <rect x="488" y="138" width="56" height="20" rx="10" fill="#dbeafe"/>
+  <text x="496" y="153" class="delta" fill="#1e40af">elim.</text>
+  <rect x="0" y="164" width="620" height="32" fill="#fafafa"/>
+  <text x="30" y="185" class="cell-bold">ET</text>
+  <text x="170" y="185" class="cell">GLEAM</text>
+  <text x="290" y="185" class="cell" fill="#9ca3af">0.88</text>
+  <text x="390" y="185" class="cell-bold">0.93</text>
+  <rect x="488" y="170" width="56" height="20" rx="10" fill="#dbeafe"/>
+  <text x="496" y="185" class="delta" fill="#1e40af">+0.05</text>
+  <text x="30" y="217" class="cell-bold">Runoff</text>
+  <text x="170" y="217" class="cell">LORA</text>
+  <text x="290" y="217" class="cell" fill="#9ca3af">0.76</text>
+  <text x="390" y="217" class="cell-bold">0.85</text>
+  <rect x="488" y="202" width="56" height="20" rx="10" fill="#dbeafe"/>
+  <text x="496" y="217" class="delta" fill="#1e40af">+0.09</text>
+  <rect x="0" y="228" width="620" height="32" fill="#fafafa"/>
+  <text x="30" y="249" class="cell-bold">Phenology</text>
+  <text x="170" y="249" class="cell">MODIS</text>
+  <text x="290" y="249" class="cell" fill="#9ca3af">0.76</text>
+  <text x="390" y="249" class="cell-bold">0.80</text>
+  <rect x="488" y="234" width="56" height="20" rx="10" fill="#dbeafe"/>
+  <text x="496" y="249" class="delta" fill="#1e40af">+0.04</text>
+  <text x="30" y="281" class="cell-bold">Water Bal.</text>
+  <text x="170" y="281" class="cell">P=ET+R</text>
+  <text x="290" y="281" class="cell" fill="#9ca3af">−81</text>
+  <text x="390" y="281" class="cell-bold">−3</text>
+  <rect x="488" y="266" width="56" height="20" rx="10" fill="#ede9fe"/>
+  <text x="496" y="281" class="delta" fill="#7c3aed">mm/yr</text>
+</svg>
