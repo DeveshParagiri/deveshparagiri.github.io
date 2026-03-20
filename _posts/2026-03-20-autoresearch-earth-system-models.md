@@ -1,19 +1,22 @@
 ---
 layout: post
 title: Autoresearch for Earth System Models
-date: 2026-03-20 12:00:00-0400
-description: Using LLMs to systematically diagnose and replace parameterized formulas in a global terrestrial biosphere model, guided by physics and validated against observations.
+date: 2026-03-20 01:00:00-0400
+description:
 tags: ai, research, earth-science
 categories: code
 related_posts: false
 giscus_comments: false
 published: true
 pretty_table: true
+mermaid:
+  enabled: true
+  zoomable: true
 ---
 
-Earth system models simulate plant growth, fire, soil carbon cycling, and water fluxes globally. They contain hundreds of parameterized formulas governing these processes, many of which have remained structurally unchanged since their original publications in the 1980s and 1990s. Tuning the parameters of these formulas is the standard approach to model improvement, and it assumes the underlying equation is correct. In this work, we describe an autoresearch methodology that uses LLMs to go further: systematically evaluating whether the formula _structure itself_ should be replaced, searching the joint space of equations and parameters against observational benchmarks, and maintaining physical interpretability throughout.
+Earth system models simulate plant growth, fire, soil carbon cycling, and water fluxes globally. They contain hundreds of parameterized formulas governing these processes, many of which have remained structurally unchanged since their original publications in the 1980s and 1990s. Tuning the parameters of these formulas is the standard approach to model improvement, and it assumes the underlying equation is correct. In this work, we describe an autoresearch methodology that uses LLMs to systematically evaluate whether the formula _structure itself_ should be replaced, searching the joint space of equations and parameters against observational benchmarks, and maintaining physical interpretability throughout.
 
-We applied this methodology to the Ecosystem Demography model (ED v3.0; Ma et al. 2022), an individual-based terrestrial biosphere model used for carbon cycle projections and land-use change studies. ED simulates every tree and grass cohort globally, computing photosynthesis, growth, mortality, phenology, soil carbon decomposition, hydrology, and fire disturbance at each timestep. The International Land Model Benchmarking project (iLAMB; Collier et al. 2018) evaluates ED against 21 other models in the TRENDY/GCB ensemble. ED ranks poorly on several benchmarks, particularly soil carbon stocks, fire emissions, and evapotranspiration.
+We applied this methodology to the Ecosystem Demography model (ED v3.0; Ma et al. 2022), an individual-based terrestrial biosphere model used for carbon cycle projections and land-use change studies. ED simulates every tree and grass cohort globally, computing photosynthesis, growth, mortality, phenology, soil carbon decomposition, hydrology, and fire disturbance at each timestep. The International Land Model Benchmarking project (iLAMB; Collier et al. 2018) evaluates ED against 21 other models in the TRENDY/GCB ensemble.
 
 ---
 
@@ -27,15 +30,19 @@ The LLM serves as a diagnostic engine, drawing on the ecological and biogeochemi
 
 ### The Autoresearch Loop
 
-The methodology follows a systematic cycle applied to each model module:
+The methodology follows a systematic cycle applied to each model module. The parameterized formula is extracted from the model's C++ source and replicated in Python, enabling fast evaluation over the global 0.5° grid (~1 second per evaluation). The Python replica is compared against gridded observational datasets (HWSD for soil carbon, GLEAM for evapotranspiration, GFED for burned area, FLUXCOM for gross primary productivity, MODIS for leaf area index, LORA for runoff). The LLM then diagnoses _why_ the model disagrees with observations, drawing on physical reasoning to propose structural alternatives organized along defined axes.
 
-<div class="row mt-3">
-    <div class="col-sm mt-3 mt-md-0">
-        {% include figure.liquid loading="eager" path="assets/img/autoresearch_ed/autoresearch_loop.svg" class="img-fluid rounded z-depth-1" zoomable=true %}
-    </div>
-</div>
-
-The parameterized formula is extracted from the model's C++ source and replicated in Python, enabling fast evaluation over the global 0.5° grid (~1 second per evaluation). The Python replica is compared against gridded observational datasets (HWSD for soil carbon, GLEAM for evapotranspiration, GFED for burned area, FLUXCOM for gross primary productivity, MODIS for leaf area index, LORA for runoff). The LLM then diagnoses _why_ the model disagrees with observations, drawing on physical reasoning to propose structural alternatives organized along defined axes.
+```mermaid
+flowchart LR
+    A["Extract Formula\nfrom C++ source"] --> B["Replicate in Python\n~1s per global grid"]
+    B --> C["Evaluate vs\nObservations"]
+    C --> D["LLM Diagnosis\nwhy does it fail?"]
+    D --> E["Propose Alternatives\nalong physical axes"]
+    E --> F["Bayesian Search\nstructure × params"]
+    F --> G["Validate\ncross-validation"]
+    G --> H["C++ Replacement"]
+    H -.->|iterate| C
+```
 
 Each axis represents a dimension of the formula's physical assumptions. For soil carbon decomposition, the axes include: (1) the temperature response function (Q10 vs. Lloyd-Taylor vs. Arrhenius vs. bell-curve), (2) the moisture response function (piecewise linear vs. log-parabolic vs. Michaelis-Menten with anaerobic suppression), (3) the pool structure (4-pool CENTURY vs. 3-pool vs. 2-pool), and (4) additional input variables (vegetation cover effects on soil temperature). Each alternative on each axis corresponds to a published model or physical mechanism.
 
@@ -49,11 +56,19 @@ Each module receives a tailored multi-metric objective function reflecting what 
 
 The modules in ED form a directed dependency graph. Climate forcing drives photosynthesis, which feeds growth and hydrology. Hydrology governs soil moisture, which feeds back to phenology and soil carbon decomposition. Litter from growth and mortality enters the soil carbon pools. Fire is downstream of all other processes, depending on fuel load (biomass), fuel moisture (dryness), and seasonal productivity (GPP).
 
-<div class="row mt-3">
-    <div class="col-sm mt-3 mt-md-0">
-        {% include figure.liquid loading="eager" path="assets/img/autoresearch_ed/dependency_graph.svg" class="img-fluid rounded z-depth-1" zoomable=true %}
-    </div>
-</div>
+```mermaid
+flowchart TD
+    CF["Climate Forcing\nT, P, radiation, humidity, CO₂"] --> PS["Photosynthesis\nGPP r: 0.56 → 0.73"]
+    CF --> HY["Hydrology\nET r: 0.88 → 0.93"]
+    PS --> GR["Growth\nallocation, NPP"]
+    PS --> PH["Phenology\nLAI r: 0.76 → 0.80"]
+    HY --> PH
+    HY --> RO["Runoff\nr: 0.76 → 0.85"]
+    GR --> SC["Soil Carbon\nr: 0.43 → 0.48, bias: −50% → 0%"]
+    PH --> SC
+    HY -.-> MO["Mortality"]
+    SC --> FI["Fire\nr: 0.09 → 0.65"]
+```
 
 This dependency structure determined our optimization order and revealed constraints that single-module optimization would miss. An improvement to the photosynthesis module cascades to better litter input estimates, which in turn affect soil carbon predictions. Evapotranspiration and runoff share water balance as a conservation law: they cannot be optimized independently without risking physical inconsistency. We return to this cross-module consistency problem in a later section.
 
@@ -68,12 +83,6 @@ $$\text{fire} = \text{AGB} \times \left(\frac{\bar{D}}{\text{norm}}\right)^{\tex
 This formulation assumes that fire risk increases monotonically with fuel load and dryness. Evaluation against GFED4.1s burned area (Randerson et al. 2017) yielded a spatial correlation of r = 0.09, effectively no skill.
 
 The LLM diagnosis identified a well-documented ecological pattern that the formula structure fails to capture: fire occurrence peaks at intermediate levels of productivity (Pausas & Ribeiro 2013). Savannas burn frequently because they produce sufficient fuel during the wet season that cures during the dry season. Closed-canopy rainforests rarely burn because high humidity prevents fuel drying. Deserts and sparse shrublands lack fuel entirely. This intermediate productivity hypothesis requires a _unimodal_ response to biomass, which a monotonically increasing power law cannot represent.
-
-<div class="row mt-3">
-    <div class="col-sm mt-3 mt-md-0">
-        {% include figure.liquid loading="eager" path="assets/img/autoresearch_ed/fire_hump.svg" class="img-fluid rounded z-depth-1" zoomable=true %}
-    </div>
-</div>
 
 The replacement formula couples a sigmoid ignition function with a unimodal fuel response:
 
@@ -103,11 +112,21 @@ The Q10 formulation assumes a fixed proportional increase in decomposition rate 
 
 $$T_d = R_0 \cdot \exp\left(E_0 \cdot \left(\frac{1}{56.02} - \frac{1}{T + 46.02}\right)\right)$$
 
-<div class="row mt-3">
-    <div class="col-sm mt-3 mt-md-0">
-        {% include figure.liquid loading="eager" path="assets/img/autoresearch_ed/temp_response.svg" class="img-fluid rounded z-depth-1" zoomable=true %}
-    </div>
-</div>
+```echarts
+{
+  "tooltip": {"trigger": "axis"},
+  "legend": {"data": ["Q10 (original)", "Lloyd-Taylor (1994)"], "top": "5%"},
+  "xAxis": {"type": "category", "name": "Temperature (°C)", "nameLocation": "center", "nameGap": 30, "data": ["-20","-15","-10","-5","0","5","10","15","20","25","30","35","40","45"]},
+  "yAxis": {"type": "value", "name": "Decomposition rate", "nameLocation": "center", "nameGap": 40, "max": 1.0},
+  "series": [
+    {"name": "Q10 (original)", "type": "line", "smooth": true, "lineStyle": {"type": "dashed", "width": 2}, "data": [0,0,0,0,0,0.07,0.10,0.14,0.20,0.28,0.40,0.57,0.80,1.00], "itemStyle": {"color": "#e74c3c"}},
+    {"name": "Lloyd-Taylor (1994)", "type": "line", "smooth": true, "lineStyle": {"width": 2}, "data": [0,0,0,0,0,0.03,0.05,0.09,0.15,0.24,0.38,0.58,0.84,1.00], "itemStyle": {"color": "#3498db"}}
+  ],
+  "grid": {"left": "12%", "right": "5%", "bottom": "15%"}
+}
+```
+
+The key difference is visible in the 0-10°C range: Lloyd-Taylor rises more gradually from freezing, allowing cold soils to retain more carbon. This matches the observed pattern where boreal and arctic soils contain disproportionately large carbon stocks relative to their low temperatures.
 
 Replacing Q10 with Lloyd-Taylor improved soil carbon predictions at high latitudes, where the original formulation allowed decomposition rates that were too high relative to the cold temperatures. We also replaced the piecewise-linear moisture response with a log-parabolic function (Moyano et al. 2013), which provides a smooth optimum without hard breakpoints:
 
@@ -129,12 +148,6 @@ $$P = ET + R + \Delta S$$
 
 At the annual timescale, changes in storage ($$\Delta S$$) are approximately zero, so precipitation should equal evapotranspiration plus runoff. When ET and runoff are optimized against their respective observational targets (GLEAM and LORA) using independently chosen formulations, this constraint can be violated. We found an 81 mm/yr global residual when using separately optimized models.
 
-<div class="row mt-3">
-    <div class="col-sm mt-3 mt-md-0">
-        {% include figure.liquid loading="eager" path="assets/img/autoresearch_ed/water_balance.svg" class="img-fluid rounded z-depth-1" zoomable=true %}
-    </div>
-</div>
-
 Joint optimization using a single ET formulation for both targets resolved this. We replaced ED's hourly Penman-Monteith scheme with the Hargreaves PET estimate (Hargreaves & Samani 1985) coupled to Zhang's vegetation-dependent Budyko curve (Zhang et al. 2001), partitioned between soil evaporation and canopy transpiration using Beer's law interception:
 
 $$\frac{ET}{P} = \frac{1 + w \cdot PET/P}{1 + w \cdot PET/P + P/PET}$$
@@ -153,7 +166,7 @@ This gap propagates through the entire dependency graph. Absent vegetation means
 
 We addressed this with a climate-based gap-fill model. For GPP, we used a light-use efficiency formulation (Running et al. 2004) driven by CRU TS temperature and precipitation. For LAI, we used a biome-blended model based on the Growing Season Index (Jolly et al. 2005), with separate sub-models for temperature-limited (boreal), water-limited (arid), and energy-limited (tropical) regimes. The gap-fill extended the model's land coverage by 30% and improved high-latitude soil carbon correlation (against NCSCD) by 76%.
 
-This finding illustrates a benefit of the autoresearch framework that extends beyond formula optimization. By forcing systematic evaluation of every module against gridded observations, systemic issues that span multiple modules become visible. The vegetation coverage gap was not identifiable from any single module's performance; it required examining the intersection of soil carbon, ET, and GPP failures at the same grid cells.
+This finding illustrates a benefit of the autoresearch framework that extends beyond formula optimization. By forcing systematic evaluation of every module against gridded observations, systemic issues that span multiple modules become visible. The vegetation coverage gap was identifiable only by examining the intersection of soil carbon, ET, and GPP failures at the same grid cells.
 
 ---
 
@@ -161,18 +174,23 @@ This finding illustrates a benefit of the autoresearch framework that extends be
 
 Across the model, the autoresearch methodology produced five structural changes, each representing a revised understanding of how an ecosystem process operates at the global scale.
 
-<div class="row mt-3">
-    <div class="col-sm mt-3 mt-md-0">
-        {% include figure.liquid loading="eager" path="assets/img/autoresearch_ed/results_table.svg" class="img-fluid rounded z-depth-1" zoomable=true %}
-    </div>
-</div>
+| Module | Benchmark | Before | After | Change |
+|--------|-----------|--------|-------|--------|
+| Fire | GFED | 0.09 | **0.65** | +0.56 |
+| GPP | FLUXCOM | 0.56 | **0.73** | +0.17 |
+| Soil Carbon | HWSD | 0.43 | **0.48** | +0.05 |
+| Soil C bias | HWSD | −50% | **0%** | eliminated |
+| ET | GLEAM | 0.88 | **0.93** | +0.05 |
+| Runoff | LORA | 0.76 | **0.85** | +0.09 |
+| Phenology | MODIS | 0.76 | **0.80** | +0.04 |
+| Water Balance | P=ET+R | −81 mm/yr | **−3 mm/yr** | closed |
 
 | Process | Original Formulation | Replacement | Physical Rationale |
 |---------|---------------------|-------------|-------------------|
 | Fire disturbance | Power-law (AGB × dryness) | Sigmoid × unimodal hump | Intermediate productivity hypothesis (Pausas & Ribeiro 2013) |
 | Decomposition temperature | Q10 (Parton et al. 1993) | Lloyd-Taylor (1994) | Enzyme kinetics flatten near freezing |
 | Decomposition moisture | Piecewise linear | Log-parabolic (Moyano et al. 2013) | Smooth optimum, no hard breakpoints |
-| Soil carbon pools | 4-pool CENTURY | 2-pool (labile + stable) | Obs can't constrain 4 pools; passive pool was inert |
+| Soil carbon pools | 4-pool CENTURY | 2-pool (labile + stable) | Observations cannot constrain 4 pools; passive pool was inert |
 | Evapotranspiration | Penman-Monteith (hourly) | Hargreaves + Zhang Budyko | Vegetation-dependent water-energy partitioning |
 
 In every case, the largest gains came from changing the functional form of the equation, informed by ecological reasoning about the physical process, rather than from tuning parameters within the original formulation.
