@@ -8,10 +8,8 @@ categories: code
 giscus_comments: false
 published: true
 pretty_table: true
-authors:
-  - name: Dev Paragiri
-    affiliations:
-      name: University of Maryland
+chart:
+  echarts: true
 bibliography: 2026-03-20-autoresearch-earth-system-models.bib
 
 toc:
@@ -26,12 +24,6 @@ toc:
   - name: Limitations and Generalization
 
 _styles: >
-  html {
-    scroll-behavior: auto !important;
-  }
-  d-title {
-    scroll-margin-top: 0 !important;
-  }
   table {
     border-collapse: collapse !important;
     width: 100% !important;
@@ -92,52 +84,37 @@ The fire module provided the initial proof of concept for the autoresearch metho
 
 $$\text{fire} = \text{AGB} \times \left(\frac{\bar{D}}{\text{norm}}\right)^{\text{exp}}$$
 
----
-
-This formulation assumes that fire risk increases monotonically with fuel load and dryness. Evaluation against [GFED4.1s](https://www.globalfiredata.org/) burned area (<d-cite key="hashimoto2015soil"></d-cite>) yielded a spatial correlation of r = 0.09, effectively no skill.
+This formulation assumes that fire risk increases monotonically with fuel load and dryness. Evaluation against [GFED4.1s](https://www.globalfiredata.org/) burned area <d-cite key="hashimoto2015soil"></d-cite> yielded a spatial correlation of r = 0.09, effectively no skill.
 
 The LLM diagnosis identified a well-documented ecological pattern that the formula structure fails to capture: fire occurrence peaks at intermediate levels of productivity <d-cite key="pausas2013fire"></d-cite>. Savannas burn frequently because they produce sufficient fuel during the wet season that cures during the dry season. Closed-canopy rainforests rarely burn because high humidity prevents fuel drying. Deserts and sparse shrublands lack fuel entirely. This intermediate productivity hypothesis requires a _unimodal_ response to biomass, which a monotonically increasing power law cannot represent.
 
 The replacement formula couples a sigmoid ignition function with a unimodal fuel response:
 
----
-
 $$\text{fire} = \frac{1}{1 + e^{-k(\bar{D} - D_0)}} \times \left(1 - e^{-\text{AGB}/b}\right) e^{-\text{AGB}/d}$$
-
----
 
 The sigmoid captures the threshold behavior of fuel curing (a smooth transition from non-flammable to flammable as dryness accumulates). The hump-shaped fuel term peaks at intermediate biomass, consistent with the savanna fire regime. Spatial correlation improved to r = 0.41.
 
 Incorporating GPP as a third input further improved the model to r = 0.65. GPP captures the seasonal productivity cycle through its linkage to stomatal conductance: high GPP during the growing season indicates active transpiration and fuel production, while subsequent dry-season GPP decline indicates fuel curing. For reference, published global fire models in the TRENDY ensemble typically achieve r = 0.5-0.7 against GFED.
 
-$$\text{fire} = \text{sigmoid}(\bar{D}) \times \text{fuel\_hump}(\text{AGB}) \times \text{productivity\_hump}(\text{GPP})$$
+$$\text{fire} = \text{sigmoid}(\bar{D}) \times \text{fuel_hump}(\text{AGB}) \times \text{productivity_hump}(\text{GPP})$$
 
 This structural change, from a monotonic to a unimodal response, was the primary source of improvement. Parameter tuning within the original power-law structure yielded negligible gains.
-
----
 
 ### Decomposition and the Cold Soil Problem
 
 ED's soil carbon decomposition follows a simplified [CENTURY model](https://www2.nrel.colostate.edu/projects/century/) <d-cite key="parton1993century"></d-cite> with four carbon pools (structural, fast, slow, passive) and a decomposition scalar that combines temperature and moisture effects:
 
----
-
 $$T_d = R_0 \cdot Q_{10}^{(T - 25)/10}, \quad W_d = \text{piecewise}(\theta; 0.3, 0.6)$$
 
 $$A = T_d \cdot W_d$$
-
----
 
 The constants $$R_0 = 0.40$$, $$Q_{10} = 1.5$$, and the moisture breakpoints are hardcoded in the C++ source. They have never been tuned against observational soil carbon datasets.
 
 The Q10 formulation assumes a fixed proportional increase in decomposition rate per 10°C warming. At low temperatures, this produces an exponentially declining curve that approaches zero at 0°C. Davidson and Janssens <d-cite key="davidson2006temperature"></d-cite> review the evidence that this formulation overestimates temperature sensitivity at low temperatures, where enzyme kinetics are better described by activation energy models. The Lloyd-Taylor <d-cite key="lloyd1994temperature"></d-cite> response, derived from an Arrhenius framework with an empirical correction for enzyme behavior near freezing, asymptotically flattens below approximately 5°C:
 
----
-
 $$T_d = R_0 \cdot \exp\left(E_0 \cdot \left(\frac{1}{56.02} - \frac{1}{T + 46.02}\right)\right)$$
 
----
-
+<br>
 ```echarts
 {
   "tooltip": {"trigger": "axis"},
@@ -151,18 +128,12 @@ $$T_d = R_0 \cdot \exp\left(E_0 \cdot \left(\frac{1}{56.02} - \frac{1}{T + 46.02
   "grid": {"left": "12%", "right": "5%", "bottom": "15%"}
 }
 ```
-
----
-
+<br>
 The key difference is visible in the 0-10°C range: Lloyd-Taylor rises more gradually from freezing, allowing cold soils to retain more carbon. This matches the observed pattern where boreal and arctic soils contain disproportionately large carbon stocks relative to their low temperatures.
 
 Replacing Q10 with Lloyd-Taylor improved soil carbon predictions at high latitudes, where the original formulation allowed decomposition rates that were too high relative to the cold temperatures. We also replaced the piecewise-linear moisture response with a log-parabolic function <d-cite key="moyano2013moisture"></d-cite>, which provides a smooth optimum without hard breakpoints:
 
----
-
 $$W_d = \exp\left(-\frac{(\ln(\theta / \theta_{\text{opt}}))^2}{2\sigma^2}\right)$$
-
----
 
 The optimized moisture parameter $$\sigma = 3.7$$ is very wide, indicating that moisture has a weak spatial modulating effect on decomposition at the global scale. Temperature dominates. This is consistent with the global synthesis of Bond-Lamberty and Thomson <d-cite key="bond2010soil"></d-cite>.
 
@@ -170,27 +141,17 @@ We further simplified the four-pool CENTURY structure to a two-pool model (labil
 
 The global soil carbon bias decreased from −50% to effectively zero. Spatial correlation against HWSD improved from 0.43 to 0.48. At high latitudes, correlation against the [Northern Circumpolar Soil Carbon Database (NCSCD)](https://bolin.su.se/data/ncscd/) <d-cite key="hugelius2014ncscd"></d-cite> improved from 0.11 to 0.19 after incorporating a vegetation gap-fill (discussed below).
 
----
-
 ### Closing the Water Balance
 
 Evapotranspiration, runoff, and precipitation must satisfy a conservation law:
 
----
-
 $$P = ET + R + \Delta S$$
-
----
 
 At the annual timescale, changes in storage ($$\Delta S$$) are approximately zero, so precipitation should equal evapotranspiration plus runoff. When ET and runoff are optimized against their respective observational targets (GLEAM and LORA) using independently chosen formulations, this constraint can be violated. We found an 81 mm/yr global residual when using separately optimized models.
 
 Joint optimization using a single ET formulation for both targets resolved this. We replaced ED's hourly Penman-Monteith scheme with the [Hargreaves PET estimate](https://elibrary.asabe.org/abstract.asp?aid=26773) <d-cite key="hargreaves1985reference"></d-cite> coupled to Zhang's [vegetation-dependent Budyko curve](https://doi.org/10.1029/2000WR900325) <d-cite key="zhang2001response"></d-cite>, partitioned between soil evaporation and canopy transpiration using Beer's law interception:
 
----
-
 $$\frac{ET}{P} = \frac{1 + w \cdot PET/P}{1 + w \cdot PET/P + P/PET}$$
-
----
 
 The parameter $$w$$ controls the vegetation dependency. A higher $$w$$ means a larger fraction of precipitation is returned to the atmosphere through transpiration, reflecting the deeper rooting depth and higher canopy conductance of forests compared to grasslands. The optimized value $$w = 5.2$$ indicates strong vegetation control on the water balance. Canopy transpiration exceeds bare-soil evaporation by approximately 44% at the same atmospheric demand, consistent with eddy-covariance observations across biome gradients.
 

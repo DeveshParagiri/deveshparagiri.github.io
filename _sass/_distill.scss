@@ -2,8 +2,111 @@
  * Style overrides for distill blog posts.
  ******************************************************************************/
 
+d-title,
+d-byline,
+d-article,
+d-appendix,
+d-footnote-list,
+d-citation-list {
+  display: grid;
+  justify-items: stretch;
+  grid-template-columns: [screen-start] 8px [page-start kicker-start text-start gutter-start middle-start] 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr [text-end page-end gutter-end kicker-end middle-end] 8px [screen-end];
+  grid-column-gap: 8px;
+}
+
+@media (min-width: 768px) {
+  d-title,
+  d-byline,
+  d-article,
+  d-appendix,
+  d-footnote-list,
+  d-citation-list {
+    grid-template-columns: [screen-start] 1fr [page-start kicker-start middle-start text-start] 45px 45px 45px 45px 45px 45px 45px 45px [kicker-end text-end gutter-start] 45px [middle-end] 45px [page-end gutter-end] 1fr [screen-end];
+    grid-column-gap: 16px;
+  }
+}
+
+@media (min-width: 1000px) {
+  d-title,
+  d-byline,
+  d-article,
+  d-appendix,
+  d-footnote-list,
+  d-citation-list {
+    grid-template-columns: [screen-start] 1fr [page-start kicker-start] 50px [middle-start] 50px [text-start kicker-end] 50px 50px 50px 50px 50px 50px 50px 50px [text-end gutter-start] 50px [middle-end] 50px [page-end gutter-end] 1fr [screen-end];
+  }
+}
+
+@media (min-width: 1180px) {
+  d-title,
+  d-byline,
+  d-article,
+  d-appendix,
+  d-footnote-list,
+  d-citation-list {
+    grid-template-columns: [screen-start] 1fr [page-start kicker-start] 60px [middle-start] 60px [text-start kicker-end] 60px 60px 60px 60px 60px 60px 60px 60px [text-end gutter-start] 60px [middle-end] 60px [page-end gutter-end] 1fr [screen-end];
+    grid-column-gap: 32px;
+  }
+}
+
+d-title {
+  padding: 2rem 0 1.5rem;
+  contain: layout style;
+  overflow-x: hidden;
+}
+
+@media (min-width: 768px) {
+  d-title {
+    padding: 4rem 0 1.5rem;
+  }
+}
+
+d-title h1,
+d-title p,
+.l-text,
+.l-body {
+  grid-column: text;
+}
+
+d-title h1 {
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1.1em;
+  margin: 0 0 0.5rem;
+}
+
+@media (min-width: 768px) {
+  d-title h1 {
+    font-size: 50px;
+  }
+}
+
+d-title p {
+  font-weight: 300;
+  font-size: 1.2rem;
+  line-height: 1.55em;
+  margin: 0;
+}
+
 d-byline {
+  contain: style;
+  overflow: hidden;
   border-top-color: var(--global-divider-color) !important;
+  font-size: 0.8rem;
+  line-height: 1.8em;
+  padding: 1.5rem 0;
+  min-height: 1.8em;
+}
+
+d-byline .byline {
+  grid-template-columns: 1fr 1fr;
+  grid-column: text;
+}
+
+@media (min-width: 768px) {
+  d-byline .byline {
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+  }
 }
 
 d-byline h3 {
@@ -34,10 +137,19 @@ d-article {
   h1,
   h2,
   hr,
-  table,
+  table {
+    border-bottom-color: var(--global-divider-color) !important;
+  }
+  table {
+    border-collapse: collapse !important;
+    width: 100% !important;
+  }
   table th,
   table td {
-    border-bottom-color: var(--global-divider-color) !important;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.35) !important;
+  }
+  table th {
+    border-bottom-width: 2px !important;
   }
   a {
     color: var(--global-theme-color) !important;
