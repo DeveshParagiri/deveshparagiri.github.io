@@ -34,17 +34,11 @@ The LLM serves as a diagnostic engine, drawing on the ecological and biogeochemi
 
 The methodology follows a systematic cycle applied to each model module. The parameterized formula is extracted from the model's C++ source and replicated in Python, enabling fast evaluation over the global 0.5° grid (~1 second per evaluation). The Python replica is compared against gridded observational datasets ([HWSD](https://www.fao.org/soils-portal/data-hub/soil-maps-and-databases/harmonized-world-soil-database-v12/en/) for soil carbon, [GLEAM](https://www.gleam.eu/) for evapotranspiration, [GFED](https://www.globalfiredata.org/) for burned area, [FLUXCOM](https://www.fluxcom.org/) for gross primary productivity, [MODIS](https://modis.gsfc.nasa.gov/) for leaf area index, [LORA](https://geonetwork.nci.org.au/geonetwork/srv/eng/catalog.search#/metadata/f9617_9854_8096_5291) for runoff). The LLM then diagnoses _why_ the model disagrees with observations, drawing on physical reasoning to propose structural alternatives organized along defined axes.
 
-```mermaid
-flowchart TD
-    A["Extract Formula from C++ source"] --> B["Replicate in Python\n~1s per global grid"]
-    B --> C["Evaluate vs Observations\niLAMB benchmarks"]
-    C --> D["LLM Diagnosis\nwhy does the formula\ndisagree with observations?"]
-    D --> E["Propose Structural Alternatives\nalong physical axes"]
-    E --> F["Bayesian Search\nstructure × parameters\n500-2000 trials"]
-    F --> G["Validate\nspatial cross-validation"]
-    G --> H["C++ Replacement\nportable formula"]
-    H -.->|iterate| C
-```
+<div class="row mt-3">
+    <div class="col-sm mt-3 mt-md-0">
+        {% include figure.liquid loading="eager" path="assets/img/autoresearch_ed/autoresearch_loop.png" class="img-fluid rounded z-depth-1" zoomable=true %}
+    </div>
+</div>
 
 Each axis represents a dimension of the formula's physical assumptions. For soil carbon decomposition, the axes include: (1) the temperature response function (Q10 vs. Lloyd-Taylor vs. Arrhenius vs. bell-curve), (2) the moisture response function (piecewise linear vs. log-parabolic vs. Michaelis-Menten with anaerobic suppression), (3) the pool structure (4-pool CENTURY vs. 3-pool vs. 2-pool), and (4) additional input variables (vegetation cover effects on soil temperature). Each alternative on each axis corresponds to a published model or physical mechanism.
 
