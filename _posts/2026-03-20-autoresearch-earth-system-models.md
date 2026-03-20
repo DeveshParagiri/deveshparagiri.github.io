@@ -25,6 +25,26 @@ toc:
   - name: Summary of Ecological Changes
   - name: Limitations and Generalization
 
+_styles: >
+  d-article table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1.5rem 0;
+  }
+  d-article table th,
+  d-article table td {
+    border-bottom: 1px solid rgba(128, 128, 128, 0.3);
+    padding: 0.6rem 0.8rem;
+    text-align: left;
+  }
+  d-article table th {
+    border-bottom: 2px solid rgba(128, 128, 128, 0.5);
+    font-weight: 600;
+  }
+  d-article table tr:last-child td {
+    border-bottom: 1px solid rgba(128, 128, 128, 0.3);
+  }
+
 ---
 
 Inspired in part by Karpathy's [autoresearch](https://github.com/karpathy/autoresearch) framework for LLM-driven scientific discovery, we apply the idea to a domain where the formulas are grounded in physics and the observations are global. Earth system models simulate plant growth, fire, soil carbon cycling, and water fluxes globally. They contain hundreds of parameterized formulas governing these processes, many of which have remained structurally unchanged since their original publications in the 1980s and 1990s. Tuning the parameters of these formulas is the standard approach to model improvement, and it assumes the underlying equation is correct. In this work, we describe an autoresearch methodology that uses LLMs to systematically evaluate whether the formula _structure itself_ should be replaced, searching the joint space of equations and parameters against observational benchmarks, and maintaining physical interpretability throughout.
@@ -174,8 +194,6 @@ The parameter $$w$$ controls the vegetation dependency. A higher $$w$$ means a l
 
 The joint optimization reduced the water balance residual from −81 to −3 mm/yr while maintaining ET correlation at r = 0.93 (against GLEAM) and runoff correlation at r = 0.83 (against LORA).
 
----
-
 ### The Vegetation Coverage Gap
 
 Systematic evaluation across all modules revealed an unexpected finding: 22% of land cells where MODIS observes vegetation and HWSD reports soil carbon, the model initializes no vegetation. These cells are primarily high-latitude tundra and sparse boreal regions (50% of gap cells lie above 60°N, with mean annual temperature of −4.7°C). MODIS confirms real vegetation in these cells, with mean LAI of 0.34.
@@ -186,13 +204,9 @@ We addressed this with a climate-based gap-fill model. For GPP, we used a [light
 
 This finding illustrates a benefit of the autoresearch framework that extends beyond formula optimization. By forcing systematic evaluation of every module against gridded observations, systemic issues that span multiple modules become visible. The vegetation coverage gap was identifiable only by examining the intersection of soil carbon, ET, and GPP failures at the same grid cells.
 
----
-
 ### Summary of Ecological Changes
 
 Across the model, the autoresearch methodology produced five structural changes, each representing a revised understanding of how an ecosystem process operates at the global scale.
-
-----
 
 | Module | Benchmark | Before | After | Change |
 |--------|-----------|--------|-------|--------|
