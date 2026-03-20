@@ -23,23 +23,23 @@ We applied this methodology to the [Ecosystem Demography model (ED v3.0)](https:
 ---
 
 ### Physical Grounding as a Design Constraint
-
 Every formula proposed by the autoresearch system must correspond to a named physical process with published justification. Lloyd-Taylor (1994) for the temperature dependence of enzyme kinetics near freezing. Budyko (1974) for water-energy partitioning at the catchment scale. Monteith (1972) for the proportionality between intercepted radiation and plant growth. Hargreaves and Samani (1985) for estimating evaporative demand from diurnal temperature range. Zhang et al. (2001) for the vegetation-dependent partitioning of precipitation into evapotranspiration and runoff.
 
 The LLM serves as a diagnostic engine, drawing on the ecological and biogeochemical literature to identify structural mismatches between model assumptions and observed spatial patterns. All formulas are expressed in basic arithmetic operations (exponential, logarithm, power, conditionals) and must be portable to the model's native C++ implementation. This constraint excludes neural networks, learned embeddings, and any representation that cannot be interpreted in terms of a physical mechanism.
 
 ---
-
 ### The Autoresearch Loop
 
 The methodology follows a systematic cycle applied to each model module. The parameterized formula is extracted from the model's C++ source and replicated in Python, enabling fast evaluation over the global 0.5° grid (~1 second per evaluation). The Python replica is compared against gridded observational datasets ([HWSD](https://www.fao.org/soils-portal/data-hub/soil-maps-and-databases/harmonized-world-soil-database-v12/en/) for soil carbon, [GLEAM](https://www.gleam.eu/) for evapotranspiration, [GFED](https://www.globalfiredata.org/) for burned area, [FLUXCOM](https://www.fluxcom.org/) for gross primary productivity, [MODIS](https://modis.gsfc.nasa.gov/) for leaf area index, [LORA](https://geonetwork.nci.org.au/geonetwork/srv/eng/catalog.search#/metadata/f9617_9854_8096_5291) for runoff). The LLM then diagnoses _why_ the model disagrees with observations, drawing on physical reasoning to propose structural alternatives organized along defined axes.
 
+---
 <div class="row mt-3">
     <div class="col-sm mt-3 mt-md-0">
         {% include figure.liquid loading="eager" path="assets/img/autoresearch_ed/autoresearch_loop.png" class="img-fluid rounded z-depth-1" zoomable=true %}
     </div>
 </div>
 
+---
 Each axis represents a dimension of the formula's physical assumptions. For soil carbon decomposition, the axes include: (1) the temperature response function (Q10 vs. Lloyd-Taylor vs. Arrhenius vs. bell-curve), (2) the moisture response function (piecewise linear vs. log-parabolic vs. Michaelis-Menten with anaerobic suppression), (3) the pool structure (4-pool CENTURY vs. 3-pool vs. 2-pool), and (4) additional input variables (vegetation cover effects on soil temperature). Each alternative on each axis corresponds to a published model or physical mechanism.
 
 The search over this combinatorial space of structures, combined with continuous parameter optimization within each structure, is performed using Bayesian optimization. Specifically, we use the [Tree-structured Parzen Estimator (TPE)](https://papers.nips.cc/paper/2011/hash/86e8f7ab32cfd12577bc2619bc635690-Abstract.html) (Bergstra et al. 2011) implemented in [Optuna](https://optuna.org/). TPE is a sequential model-based optimization algorithm that builds separate probability models of the parameter space for "good" and "bad" trials, then samples new trial points that maximize the ratio of these densities. This makes it efficient in mixed search spaces (categorical structural choices combined with continuous parameters) and practical at budgets of 500-2000 evaluations per module.
@@ -52,19 +52,11 @@ Each module receives a tailored multi-metric objective function reflecting what 
 
 The modules in ED form a directed dependency graph. Climate forcing drives photosynthesis, which feeds growth and hydrology. Hydrology governs soil moisture, which feeds back to phenology and soil carbon decomposition. Litter from growth and mortality enters the soil carbon pools. Fire is downstream of all other processes, depending on fuel load (biomass), fuel moisture (dryness), and seasonal productivity (GPP).
 
-```mermaid
-flowchart TD
-    CF["Climate Forcing\nT, P, radiation, humidity, CO₂"] --> PS["Photosynthesis\nGPP r: 0.56 → 0.73"]
-    CF --> HY["Hydrology\nET r: 0.88 → 0.93"]
-    PS --> GR["Growth\nallocation, NPP"]
-    PS --> PH["Phenology\nLAI r: 0.76 → 0.80"]
-    HY --> PH
-    HY --> RO["Runoff\nr: 0.76 → 0.85"]
-    GR --> SC["Soil Carbon\nr: 0.43 → 0.48, bias: −50% → 0%"]
-    PH --> SC
-    HY -.-> MO["Mortality"]
-    SC --> FI["Fire\nr: 0.09 → 0.65"]
-```
+<div class="row mt-3">
+    <div class="col-sm mt-3 mt-md-0">
+        {% include figure.liquid loading="eager" path="assets/img/autoresearch_ed/dependency_graph.png" class="img-fluid rounded z-depth-1" zoomable=true %}
+    </div>
+</div>
 
 This dependency structure determined our optimization order and revealed constraints that single-module optimization would miss. An improvement to the photosynthesis module cascades to better litter input estimates, which in turn affect soil carbon predictions. Evapotranspiration and runoff share water balance as a conservation law: they cannot be optimized independently without risking physical inconsistency. We return to this cross-module consistency problem in a later section.
 
@@ -74,7 +66,11 @@ This dependency structure determined our optimization order and revealed constra
 
 The fire module provided the initial proof of concept for the autoresearch methodology. ED's original fire formula computed burned area as a power-law function of above-ground biomass and a dryness index:
 
+---
+
 $$\text{fire} = \text{AGB} \times \left(\frac{\bar{D}}{\text{norm}}\right)^{\text{exp}}$$
+
+---
 
 This formulation assumes that fire risk increases monotonically with fuel load and dryness. Evaluation against [GFED4.1s](https://www.globalfiredata.org/) burned area (Randerson et al. 2017) yielded a spatial correlation of r = 0.09, effectively no skill.
 
@@ -82,7 +78,11 @@ The LLM diagnosis identified a well-documented ecological pattern that the formu
 
 The replacement formula couples a sigmoid ignition function with a unimodal fuel response:
 
+---
+
 $$\text{fire} = \frac{1}{1 + e^{-k(\bar{D} - D_0)}} \times \left(1 - e^{-\text{AGB}/b}\right) e^{-\text{AGB}/d}$$
+
+---
 
 The sigmoid captures the threshold behavior of fuel curing (a smooth transition from non-flammable to flammable as dryness accumulates). The hump-shaped fuel term peaks at intermediate biomass, consistent with the savanna fire regime. Spatial correlation improved to r = 0.41.
 
@@ -98,15 +98,23 @@ This structural change, from a monotonic to a unimodal response, was the primary
 
 ED's soil carbon decomposition follows a simplified [CENTURY model](https://www2.nrel.colostate.edu/projects/century/) (Parton et al. 1993) with four carbon pools (structural, fast, slow, passive) and a decomposition scalar that combines temperature and moisture effects:
 
+---
+
 $$T_d = R_0 \cdot Q_{10}^{(T - 25)/10}, \quad W_d = \text{piecewise}(\theta; 0.3, 0.6)$$
 
 $$A = T_d \cdot W_d$$
+
+---
 
 The constants $$R_0 = 0.40$$, $$Q_{10} = 1.5$$, and the moisture breakpoints are hardcoded in the C++ source. They have never been tuned against observational soil carbon datasets.
 
 The Q10 formulation assumes a fixed proportional increase in decomposition rate per 10°C warming. At low temperatures, this produces an exponentially declining curve that approaches zero at 0°C. Davidson and Janssens (2006) review the evidence that this formulation overestimates temperature sensitivity at low temperatures, where enzyme kinetics are better described by activation energy models. The Lloyd-Taylor (1994) response, derived from an Arrhenius framework with an empirical correction for enzyme behavior near freezing, asymptotically flattens below approximately 5°C:
 
+---
+
 $$T_d = R_0 \cdot \exp\left(E_0 \cdot \left(\frac{1}{56.02} - \frac{1}{T + 46.02}\right)\right)$$
+
+---
 
 ```echarts
 {
@@ -122,11 +130,17 @@ $$T_d = R_0 \cdot \exp\left(E_0 \cdot \left(\frac{1}{56.02} - \frac{1}{T + 46.02
 }
 ```
 
+---
+
 The key difference is visible in the 0-10°C range: Lloyd-Taylor rises more gradually from freezing, allowing cold soils to retain more carbon. This matches the observed pattern where boreal and arctic soils contain disproportionately large carbon stocks relative to their low temperatures.
 
 Replacing Q10 with Lloyd-Taylor improved soil carbon predictions at high latitudes, where the original formulation allowed decomposition rates that were too high relative to the cold temperatures. We also replaced the piecewise-linear moisture response with a log-parabolic function (Moyano et al. 2013), which provides a smooth optimum without hard breakpoints:
 
+---
+
 $$W_d = \exp\left(-\frac{(\ln(\theta / \theta_{\text{opt}}))^2}{2\sigma^2}\right)$$
+
+---
 
 The optimized moisture parameter $$\sigma = 3.7$$ is very wide, indicating that moisture has a weak spatial modulating effect on decomposition at the global scale. Temperature dominates. This is consistent with the global synthesis of Bond-Lamberty and Thomson (2010).
 
@@ -140,13 +154,21 @@ The global soil carbon bias decreased from −50% to effectively zero. Spatial c
 
 Evapotranspiration, runoff, and precipitation must satisfy a conservation law:
 
+---
+
 $$P = ET + R + \Delta S$$
+
+---
 
 At the annual timescale, changes in storage ($$\Delta S$$) are approximately zero, so precipitation should equal evapotranspiration plus runoff. When ET and runoff are optimized against their respective observational targets (GLEAM and LORA) using independently chosen formulations, this constraint can be violated. We found an 81 mm/yr global residual when using separately optimized models.
 
 Joint optimization using a single ET formulation for both targets resolved this. We replaced ED's hourly Penman-Monteith scheme with the [Hargreaves PET estimate](https://elibrary.asabe.org/abstract.asp?aid=26773) (Hargreaves & Samani 1985) coupled to Zhang's [vegetation-dependent Budyko curve](https://doi.org/10.1029/2000WR900325) (Zhang et al. 2001), partitioned between soil evaporation and canopy transpiration using Beer's law interception:
 
+---
+
 $$\frac{ET}{P} = \frac{1 + w \cdot PET/P}{1 + w \cdot PET/P + P/PET}$$
+
+---
 
 The parameter $$w$$ controls the vegetation dependency. A higher $$w$$ means a larger fraction of precipitation is returned to the atmosphere through transpiration, reflecting the deeper rooting depth and higher canopy conductance of forests compared to grasslands. The optimized value $$w = 5.2$$ indicates strong vegetation control on the water balance. Canopy transpiration exceeds bare-soil evaporation by approximately 44% at the same atmospheric demand, consistent with eddy-covariance observations across biome gradients.
 
@@ -170,18 +192,23 @@ This finding illustrates a benefit of the autoresearch framework that extends be
 
 Across the model, the autoresearch methodology produced five structural changes, each representing a revised understanding of how an ecosystem process operates at the global scale.
 
+----
+
 | Module | Benchmark | Before | After | Change |
 |--------|-----------|--------|-------|--------|
 | Fire | GFED | 0.09 | **0.65** | +0.56 |
 | GPP | FLUXCOM | 0.56 | **0.73** | +0.17 |
 | Soil Carbon | HWSD | 0.43 | **0.48** | +0.05 |
-| Soil C bias | HWSD | −50% | **0%** | eliminated |
+| Soil C bias | HWSD | −50% | **0%** | Eliminated |
 | ET | GLEAM | 0.88 | **0.93** | +0.05 |
 | Runoff | LORA | 0.76 | **0.85** | +0.09 |
 | Phenology | MODIS | 0.76 | **0.80** | +0.04 |
-| Water Balance | P=ET+R | −81 mm/yr | **−3 mm/yr** | closed |
+| Water Balance | P=ET+R | −81 mm/yr | **−3 mm/yr** | Closed |
+
 
 <br>
+
+----
 
 | Process | Original Formulation | Replacement | Physical Rationale |
 |---------|---------------------|-------------|-------------------|
@@ -190,6 +217,8 @@ Across the model, the autoresearch methodology produced five structural changes,
 | Decomposition moisture | Piecewise linear | Log-parabolic (Moyano et al. 2013) | Smooth optimum, no hard breakpoints |
 | Soil carbon pools | 4-pool CENTURY | 2-pool (labile + stable) | Observations cannot constrain 4 pools; passive pool was inert |
 | Evapotranspiration | Penman-Monteith (hourly) | Hargreaves + Zhang Budyko | Vegetation-dependent water-energy partitioning |
+
+---
 
 In every case, the largest gains came from changing the functional form of the equation, informed by ecological reasoning about the physical process, rather than from tuning parameters within the original formulation.
 
