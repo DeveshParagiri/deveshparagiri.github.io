@@ -26,6 +26,12 @@ toc:
   - name: Limitations and Generalization
 
 _styles: >
+  html {
+    scroll-behavior: auto !important;
+  }
+  d-title {
+    scroll-margin-top: 0 !important;
+  }
   table {
     border-collapse: collapse !important;
     width: 100% !important;
