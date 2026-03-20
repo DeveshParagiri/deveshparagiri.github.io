@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 280" font-family="'Inter', 'Helvetica Neue', sans-serif">
+  <defs>
+    <marker id="arr3" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#374151"/>
+    </marker>
+    <style>
+      .wlabel { font-size: 14px; fill: #111827; font-weight: 600; text-anchor: middle; }
+      .wsub { font-size: 10.5px; fill: #6b7280; text-anchor: middle; }
+      .warrow { stroke: #374151; stroke-width: 2; fill: none; marker-end: url(#arr3); }
+      .weq { font-size: 16px; fill: #374151; font-weight: 500; text-anchor: middle; font-family: 'Georgia', serif; }
+    </style>
+  </defs>
+  
+  <!-- Cloud (Precipitation) -->
+  <ellipse cx="300" cy="45" rx="60" ry="25" fill="#e0f2fe" stroke="#0ea5e9" stroke-width="1.5"/>
+  <text x="300" y="42" class="wlabel" fill="#0369a1">P</text>
+  <text x="300" y="56" class="wsub" fill="#0369a1">precipitation</text>
+  
+  <!-- Arrow down to land surface -->
+  <line x1="300" y1="70" x2="300" y2="110" class="warrow"/>
+  
+  <!-- Land surface box -->
+  <rect x="150" y="110" width="300" height="60" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="300" y="138" class="wlabel" fill="#166534">Land Surface</text>
+  <text x="300" y="154" class="wsub" fill="#166534">soil moisture, vegetation</text>
+  
+  <!-- ET arrow (up-left) -->
+  <path d="M 210 110 Q 160 80 120 50" class="warrow" stroke="#f59e0b"/>
+  <text x="110" y="42" class="wlabel" fill="#b45309">ET</text>
+  <text x="110" y="56" class="wsub" fill="#b45309">evapotranspiration</text>
+
+  <!-- Runoff arrow (down-right) -->
+  <path d="M 400 170 Q 450 200 500 230" class="warrow" stroke="#2563eb"/>
+  <text x="520" y="228" class="wlabel" fill="#1e40af">R</text>
+  <text x="520" y="244" class="wsub" fill="#1e40af">runoff</text>
+  
+  <!-- Equation -->
+  <text x="300" y="230" class="weq">P  =  ET  +  R  +  ΔS</text>
+  <text x="300" y="248" class="wsub">conservation of mass</text>
+  
+  <!-- Result annotation -->
+  <rect x="160" y="258" width="280" height="20" rx="4" fill="#ede9fe"/>
+  <text x="300" y="272" font-size="10.5" fill="#6d28d9" text-anchor="middle" font-weight="500">Joint optimization: residual reduced from −81 to −3 mm/yr</text>
+</svg>
