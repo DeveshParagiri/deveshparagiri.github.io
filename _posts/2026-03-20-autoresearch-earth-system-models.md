@@ -26,23 +26,19 @@ toc:
   - name: Limitations and Generalization
 
 _styles: >
-  d-article table {
-    border-collapse: collapse;
-    width: 100%;
-    margin: 1.5rem 0;
+  table {
+    border-collapse: collapse !important;
+    width: 100% !important;
+    margin: 1.5rem 0 !important;
   }
-  d-article table th,
-  d-article table td {
-    border-bottom: 1px solid rgba(128, 128, 128, 0.3);
-    padding: 0.6rem 0.8rem;
-    text-align: left;
+  table th,
+  table td {
+    border-bottom: 1px solid rgba(128, 128, 128, 0.3) !important;
+    padding: 0.5rem 0.75rem !important;
+    text-align: left !important;
   }
-  d-article table th {
-    border-bottom: 2px solid rgba(128, 128, 128, 0.5);
-    font-weight: 600;
-  }
-  d-article table tr:last-child td {
-    border-bottom: 1px solid rgba(128, 128, 128, 0.3);
+  table th {
+    border-bottom: 2px solid rgba(128, 128, 128, 0.5) !important;
   }
 
 ---
