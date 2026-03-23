@@ -143,6 +143,7 @@ d-article {
   table {
     border-collapse: collapse !important;
     width: 100% !important;
+    max-width: 100%;
   }
   table th,
   table td {
@@ -244,6 +245,23 @@ d-article {
 
   d-footnote {
     scroll-margin-top: 66px;
+  }
+}
+
+@media (max-width: 768px) {
+  d-article table {
+    table-layout: fixed;
+  }
+
+  d-article table th,
+  d-article table td {
+    font-size: 0.85rem;
+    padding: 0.5rem 0.5rem 0.5rem 0 !important;
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: normal;
+    hyphens: auto;
+    vertical-align: top;
   }
 }
 
