@@ -20,13 +20,13 @@ social: false
 
 - applied ai research @ [gel](https://gel.umd.edu/) under [Dr. George Hurtt](https://scholar.google.com/citations?user=wr0aDMEAAAAJ&hl=en)
 
+- developing foundation models for fire risk as part of [NASA CMS](https://carbon.nasa.gov/cms/)
+
 - **recently:**
   - **[extropy](https://extropy.run)** - predictive intelligence through agent-based population simulation
   - **[wysiwyg](https://github.com/deveshparagiri/wysiwyg)** - CLI tool to detect hidden prompt injections
   - **[radal](https://x.com/devparagiri/status/1951312130889891974?s=20)** - cursor for finetuning
   - **[notes0](https://x.com/divdotdev/status/1973382562258047470?s=20)** - voice-enabled whiteboard
   - **[image2thing](https://x.com/devparagiri/status/1932506746297172437)** - ai agent for 3D modeling
-  - **[buildme](https://github.com/DeveshParagiri/buildme)** - ai cli tool for zsh
-  - **[gitprobe](https://x.com/devparagiri/status/1937247576782414051)** - repo visualization tool for LLMs (**[#23 on PH](https://www.producthunt.com/products/gitprobe)**)
 
 <br>

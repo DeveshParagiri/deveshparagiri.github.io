@@ -6,7 +6,7 @@ description: A comprehensive guide to installing Claude Code on macOS and Window
 tags: ai, research, tools
 categories: code
 giscus_comments: false
-published: true
+published: false
 pretty_table: true
 toc:
   sidebar: left
