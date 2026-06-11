@@ -23,6 +23,7 @@ social: false
 - developing foundation models for fire risk as part of [NASA CMS](https://carbon.nasa.gov/cms/)
 
 - **recently:**
+  - **[search discipline](https://arxiv.org/abs/2606.11522)** - paper on governing the decision points in autoresearch agents
   - **[extropy](https://extropy.run)** - predictive intelligence through agent-based population simulation
   - **[wysiwyg](https://github.com/deveshparagiri/wysiwyg)** - CLI tool to detect hidden prompt injections
   - **[radal](https://x.com/devparagiri/status/1951312130889891974?s=20)** - cursor for finetuning
