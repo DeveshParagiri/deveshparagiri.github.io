@@ -1,4 +1,4 @@
 User-agent: *
 Disallow:
 
-Sitemap: https://deveshparagiri.com/sitemap.xml
+Sitemap: https://paragiri.com/sitemap.xml
