@@ -192,11 +192,17 @@ d-article {
     grid-column: 1 / 4;
     grid-row: auto / span 4;
     justify-self: end;
+    position: sticky;
+    top: 5rem;
     margin-top: 0em;
     padding-left: 2em;
     padding-right: 3em;
     border-right: 1px solid var(--global-divider-color);
     width: calc(max(70%, 300px));
+    max-height: calc(100vh - 6rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
     margin-right: 0px;
     margin-top: 0em;
     display: grid;
@@ -207,21 +213,39 @@ d-article {
 
     nav {
       grid-column: toc;
+      padding: 0.15rem 0 0.5rem;
+
       a {
+        display: inline-block;
+        color: var(--global-text-color) !important;
         border-bottom: none !important;
+        text-decoration: none;
+        transition:
+          color 120ms ease,
+          border-color 120ms ease,
+          padding-left 120ms ease;
+
         &:hover {
-          border-bottom: 1px solid var(--global-text-color) !important;
+          color: var(--global-hover-color) !important;
+          border-bottom: 1px solid var(--global-hover-color) !important;
         }
       }
+
+      a.active,
+      a[aria-current="location"] {
+        color: var(--global-theme-color) !important;
+        border-bottom: 1px solid var(--global-theme-color) !important;
+      }
+
       h3 {
         margin-top: 0;
         margin-bottom: 1em;
+        color: var(--global-text-color) !important;
       }
       div {
         display: block;
         outline: none;
         margin-bottom: 0.8em;
-        color: rgba(0, 0, 0, 0.8);
         font-weight: bold;
       }
       ul {
@@ -246,6 +270,11 @@ d-article {
   d-footnote {
     scroll-margin-top: 66px;
   }
+}
+
+d-article.has-distill-toc {
+  contain: style !important;
+  overflow: visible !important;
 }
 
 @media (max-width: 768px) {
@@ -288,11 +317,18 @@ d-appendix {
       display: block;
       grid-column-start: 2;
       grid-column-end: -2;
+      grid-row: auto;
+      position: static;
+      max-height: none;
+      overflow: visible;
       padding-bottom: 0.5em;
       margin-bottom: 1em;
       padding-top: 0.5em;
       width: 100%;
       border: 1px solid var(--global-divider-color);
+      border-radius: 6px;
+      padding-left: 1em;
+      padding-right: 1em;
       nav {
         grid-column: none;
       }

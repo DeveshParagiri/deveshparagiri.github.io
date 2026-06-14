@@ -80,10 +80,10 @@
         <d-byline></d-byline>
       {% endif %}
 
-      <d-article>
+      <d-article{% if page.toc %} class="has-distill-toc"{% endif %}>
         {% if page.toc %}
-          <d-contents>
-            <nav class="l-text figcaption">
+          <d-contents class="distill-toc">
+            <nav class="l-text figcaption" aria-label="Table of contents">
               <h3>Contents</h3>
               {% for section in page.toc %}
                 <div>
@@ -127,5 +127,8 @@
     {% include scripts/search.liquid %}
     {% include scripts/chartjs.liquid %}
     {% include scripts/echarts.liquid %}
+    {% if page.toc %}
+      <script defer src="{{ '/assets/js/distill_toc.js' | relative_url | bust_file_cache }}"></script>
+    {% endif %}
   </body>
 </html>
