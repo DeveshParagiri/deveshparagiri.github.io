@@ -70,6 +70,30 @@ Enrollment is idempotent: a retry with the same public key returns the same cert
 Agent persists cert + config locally. Code marked consumed cloud-side.
 All later calls use this cert over mTLS.
 
+**Enrollment failure handling.** The agent generates and **persists its keypair to
+disk before** calling `/enroll`, then retries with that *same* key. This makes every
+transient failure recoverable:
+
+- **Call never reached the cloud** (network/timeout) -> code is still unconsumed ->
+  retry with backoff (5s, 15s, 60s, then steady). The flaky modem self-heals; Dave
+  does nothing.
+- **Cloud signed the cert but the response was lost** -> the cloud keyed enrollment
+  on `(code, key_fingerprint)`, so a retry with the same key returns the **same cert**
+  instead of "code already used." (Same idempotent-retry pattern as upload dedupe,
+  one layer earlier.)
+- **Agent crashed mid-enrollment** -> on restart, no config -> re-runs setup -> the
+  persisted keypair re-sends the same CSR -> idempotent, same cert. (This is why the
+  keypair is persisted *before* the call.)
+- **Genuinely bad code** (expired, claimed by a *different* key, typo) -> the cloud
+  returns a clear error and the agent shows Dave a specific message ("Enrollment code
+  expired, get a new one"). This is the only case Dave acts on, and it surfaces during
+  setup while he is present, not silently later.
+
+**Control → Agent `4xx` (real rejection)**
+```json
+{ "error": "code_expired" }   // or code_invalid | code_claimed_by_other_key
+```
+
 ## Step 3 — Health check
 Agent connects to SQL Server with the read-only creds and runs a trivial read.
 
@@ -208,14 +232,30 @@ starting at a zero cursor.
 
 # ACT 3 — STEADY-STATE LOOP (every interval, e.g. 60s)
 
-## Step 7 — Job poll
-Agent makes an authenticated outbound request for work. Outbound-only = no inbound
-access needed.
+## Step 7 — Job poll (report-and-fetch)
+Agent makes an authenticated outbound request that both **reports** the last job's
+result + its health and **fetches** the next job. Outbound-only = no inbound access.
 
 **Agent → Control `POST /jobs/poll`**
 ```json
-{ "agent_id": "agent-123", "tenant_id": "maplewood", "supported_protocol": 1 }
+{
+  "agent_id": "agent-123",
+  "tenant_id": "maplewood",
+  "supported_protocol": 1,
+  "last_result": {
+    "job_id": "job-788",
+    "status": "success",
+    "row_count": 3,
+    "new_watermark": 31
+  },
+  "health": { "sql_pressure": "ok", "spool_pending": 0 },
+  "events": []
+}
 ```
+`last_result` is omitted on the first poll. `events` carries any audit items the
+agent buffered in its outbox during an outage (flushed here). The cloud reads
+`last_result` -> advances the cursor + writes audit, reads `health` -> sets cadence,
+then returns the next job.
 
 ## Step 8 — Job issuance
 Control plane generates a signed job from the mapping + the entity's current sync
@@ -366,13 +406,20 @@ after ack** — never on upload — so a lost upload never skips data.
 No ack (network failure 14↔15) -> spool entry stays -> re-uploaded next loop ->
 cloud idempotency makes the retry harmless. No loss, no manual step.
 
-Status report back to control (light). The `new_watermark` is how the cloud advances
-the **cloud query cursor** — the agent reports progress, the cloud stores it in
+The result is **not** a separate call — it rides the **next** `/jobs/poll` as
+`last_result` (report-and-fetch). The `new_watermark` is how the cloud advances the
+**cloud query cursor**: the agent reports progress, the cloud stores it in
 `sync_stream_state` and uses it to generate the next job. The cloud owns the cursor;
 the agent only reports progress against it.
 ```json
-{ "job_id": "job-789", "status": "success", "row_count": 3, "new_watermark": 31 }
+"last_result": { "job_id": "job-789", "status": "success", "row_count": 3, "new_watermark": 31 }
 ```
+
+If the report itself is lost (the poll that carried it failed), it is self-correcting:
+the cursor didn't advance, so the next poll re-issues the same window, the agent
+re-diffs against local state, finds no delta, and reports an empty success. The agent
+also keeps unsent `last_result`/events in its outbox and re-sends on the next poll,
+so nothing is dropped.
 
 ---
 
@@ -419,8 +466,8 @@ The agent does not keep a separate authoritative audit. It **reports its events 
 to the cloud, which writes the durable record:
 
 - agent events (job received, job **rejected** + reason, query executed, batch
-  uploaded, upload failed) -> reported via `POST /jobs/status` (and a small
-  `POST /events` for non-job events like enrollment and health transitions)
+  uploaded, upload failed, enrollment, health transitions) ride the next
+  `/jobs/poll` as `last_result` + `events` (no separate status/events endpoint)
 - cloud writes these plus its own (receipt at 15, processing/pause at 19-20) to the
   authoritative store.
 
@@ -480,21 +527,27 @@ if no local config:
     # with real jobs. See "From Enroll to Active". No separate wait step.
 
 flush_spool()   # on startup: re-upload any un-acked batches before new work
+pending_report = None   # last job's result, sent with the NEXT poll (report-and-fetch)
 
 while True:
     # 1. FLUSH FIRST: clear any pending spool entries before taking new work.
     #    A failed upload from a prior loop is retried here, oldest-first per stream.
     flush_spool()                             # see "Failed Upload Handling"
 
-    resp = poll_control()                     # Step 7-8  -> { job, next_poll_seconds }
+    # 2. REPORT-AND-FETCH: the poll carries last_result + health + buffered events,
+    #    and returns the next job. No separate /jobs/status or /events call.
+    resp = poll_control(last_result=pending_report,
+                        health=current_health(),
+                        events=outbox_drain())   # Step 7-8 -> { job, next_poll_seconds }
+    pending_report = None
     interval = clamp(resp.next_poll_seconds, 5, 3600)   # cloud sets cadence, agent clamps
     job = resp.job
     if not job:
         sleep(interval); continue
     if not validate(job):                     # Step 9  (safety gate)
-        report_rejected(job); audit("rejected"); sleep(interval); continue
+        pending_report = result(job, "rejected"); audit("rejected"); sleep(interval); continue
 
-    # 2. ORDERING GUARD: do not start new work for an entity that still has an
+    # 3. ORDERING GUARD: do not start new work for an entity that still has an
     #    un-acked batch in the spool — its next sequence must not jump ahead.
     if spool_has_pending(job.entity):
         sleep(interval); continue             # flush_spool() above will catch up next loop
@@ -502,7 +555,7 @@ while True:
     rows = run_sql(job)                        # Step 10
     delta = diff_against_state(rows, job.entity)  # Step 11
     if delta.empty:
-        report_success(job, 0); sleep(interval); continue
+        pending_report = result(job, "success", row_count=0); sleep(interval); continue
     batch = build_batch(delta, job)           # Step 12  (allocates the next sequence)
     encrypt_and_spool(batch)                   # Step 13  (seq + batch in ONE txn)
 
@@ -510,11 +563,17 @@ while True:
     if ack.stored:
         commit_state(job.entity, batch)        # Step 16  (cursor advances ONLY here)
         prune_spool(batch)
-        report_success(job, batch.row_count)   # reports new_watermark -> cloud advances cursor
+        # staged, sent on the NEXT poll as last_result -> cloud advances cursor + audits
+        pending_report = result(job, "success", row_count=batch.row_count,
+                                new_watermark=batch.watermark)
         audit("uploaded")
     else:
         audit("upload_failed")                 # spool stays; cursor NOT advanced; flush next loop
     sleep(interval)
+
+# If a poll fails, pending_report is NOT cleared -> it rides the next successful poll.
+# Nothing is dropped; the report is self-correcting (lost report -> cursor unchanged
+# -> next poll re-issues same window -> empty delta).
 
 
 # flush_spool(): per entity stream, upload pending batches in sequence order
@@ -682,8 +741,8 @@ push and no redeploy. The cadence rides the existing poll response.
 - The agent sleeps that long, then polls again.
 - The cloud can speed up patron data, slow catalog data, back off during
   maintenance, or surge to drain a backlog after an outage.
-- If the agent reports SQL Server under pressure (in `/jobs/status`), the cloud
-  responds with a larger `next_poll_seconds` — central throttle.
+- If the agent reports SQL Server under pressure (in the poll's `health` field), the
+  cloud responds with a larger `next_poll_seconds` — central throttle.
 
 **Safety clamp (agent-side, same distrust boundary as job validation):** the agent
 does not blindly obey. It clamps to a local floor/ceiling so a bad value
@@ -755,7 +814,7 @@ cloud/
 │   │   ├── routes/
 │   │   │   ├── enroll.js       # POST /enroll
 │   │   │   ├── discovery.js    # POST /discovery
-│   │   │   └── jobs.js         # POST /jobs/poll, /jobs/status
+│   │   │   └── jobs.js         # POST /jobs/poll (report-and-fetch: result+health+events in, job out)
 │   │   ├── planner.js          # generates a job from mapping + sync state
 │   │   ├── scheduler.js        # computes next_poll_seconds per agent/entity
 │   │   └── mappingStore.js     # reads approved mappings (seeded)
@@ -799,12 +858,11 @@ Debrief map:
 
 Control plane (`:3001`):
 ```
-POST /enroll        register agent, return cert + config
-POST /discovery     receive schema inventory
-POST /jobs/poll     return { job|null, next_poll_seconds } for an agent
-POST /jobs/status   agent reports job result (incl. new_watermark) -> cloud audit
-POST /events        agent reports non-job audit events (enroll, health, rejects
-                    flushed from the local outbox after an outage) -> cloud audit
+POST /enroll        register agent, return cert + config        (one-time)
+POST /discovery     receive schema inventory                    (one-time)
+POST /jobs/poll     REPORT-AND-FETCH: agent reports last result + health +
+                    buffered events; cloud advances cursor, writes audit, sets
+                    cadence; returns { job|null, status, next_poll_seconds }
 GET  /health        sanity
 ```
 Ingestion (`:3002`):
@@ -812,6 +870,13 @@ Ingestion (`:3002`):
 POST /batches       receive encrypted batch -> S3 -> SQS -> ack
 ```
 Worker: no HTTP. Pulls SQS, needs no inbound.
+
+**Why no `/jobs/status` or `/events`:** in a poll-based design the poll *is* a
+report-and-fetch. The agent's last job result, health, and any outbox events buffered
+during an outage all ride the next `/jobs/poll` request, so the cloud advances the
+cursor, writes audit, and hands back the next job in **one round-trip** instead of
+three. The data channel (`/batches`) stays separate because it carries the heavy
+encrypted payload.
 
 ---
 
@@ -841,19 +906,22 @@ cloud: control/server.js -> routes/discovery.js
    -> shared/audit.js  (audit: discovery_received)
 ```
 
-## `POST /jobs/poll`  (Steps 7-8)  ← the heart of the loop
+## `POST /jobs/poll`  (Steps 7-8, 16-tail)  ← the heart of the loop (report-and-fetch)
 ```
 agent: sync/loop.js -> sync/poller.js
-   -> HTTP POST /jobs/poll {agent_id}
+   -> HTTP POST /jobs/poll { agent_id, last_result?, health, events[] }
 cloud: control/server.js -> routes/jobs.js
+   -> readModel.js      (apply last_result: advance cursor on success)
+   -> shared/audit.js   (write audit from last_result + events — authoritative)
+   -> scheduler.js      (read health -> compute next_poll_seconds)
    -> mappingStore.js   (load approved mapping)
-   -> readModel.js      (read sync_stream_state -> cursor/watermark)
+   -> readModel.js      (read cloud query cursor)
    -> planner.js        (template + mapping + cursor -> signed SQL job)
-   -> scheduler.js      (compute next_poll_seconds)
-   <- { job | null, next_poll_seconds }
+   <- { job | null, status, next_poll_seconds }
 agent: sync/validator.js   (SAFETY GATE: signature/allowlist/limits/read-only)
-       sync/loop.js        (clamp next_poll_seconds 5..3600)
+       sync/loop.js        (clamp next_poll_seconds 5..3600; stage next last_result)
 ```
+One round-trip does report + audit + cadence + fetch. No `/jobs/status` or `/events`.
 
 ## query execution + upload  (Steps 9-14)
 ```
@@ -877,20 +945,13 @@ cloud: ingestion/server.js -> routes/batches.js
 agent: transport/spool.js (prune), state/store.js (commit cursor AFTER ack)
 ```
 
-## `POST /jobs/status`  (Step 16 tail)  + `POST /events`
+## reporting results + events  (folded into the next `/jobs/poll`)
 ```
-agent: sync/loop.js -> HTTP POST /jobs/status {job_id, status, new_watermark, reason?}
-       (status = success | rejected | failed | timeout)
-       state/store.js  (write to local OUTBOX first; if cloud unreachable, retry later)
-cloud: control/routes/jobs.js
-   -> readModel.js (advance sync_stream_state cursor on success)
-   -> shared/audit.js (audit: job_result / rejected / failed — authoritative)
-
-# non-job events (enroll, health transitions, outbox flush after outage):
-agent: -> HTTP POST /events {type, ...}
-cloud: control/routes/events.js -> shared/audit.js (authoritative)
-
-# On reconnect, the agent flushes any buffered outbox events to the cloud.
+# No separate /jobs/status or /events endpoint. Each job's result is staged in the
+# agent and sent as `last_result` on the NEXT poll; health and any outbox-buffered
+# events ride the same request. The cloud applies them (cursor advance + audit)
+# before returning the next job. If a poll fails, the staged result stays in the
+# agent outbox and rides the next successful poll — nothing dropped.
 ```
 
 ## worker (no HTTP)  (Steps 17-20)
@@ -1018,8 +1079,38 @@ export const Job = z.object({
   signature: z.string(),
 });
 
+// JobResult is embedded in the poll request as `last_result` (not its own endpoint).
+export const JobResult = z.object({
+  job_id: z.string(),
+  status: z.enum(["success", "rejected", "failed", "timeout"]),
+  row_count: z.number().int().optional(),
+  new_watermark: z.number().int().optional(),
+  reason: z.string().optional(),
+});
+
+export const AuditEvent = z.object({
+  type: z.string(),               // enrolled | health | rejected | upload_failed | ...
+  at: z.string(),                 // ISO timestamp
+  detail: z.record(z.unknown()).optional(),
+});
+
+// /jobs/poll request — report-and-fetch.
+export const PollRequest = z.object({
+  agent_id: z.string(),
+  tenant_id: z.string(),
+  supported_protocol: z.number().int(),
+  last_result: JobResult.optional(),               // omitted on first poll
+  health: z.object({
+    sql_pressure: z.enum(["ok", "high"]),
+    spool_pending: z.number().int().nonnegative(),
+  }).optional(),
+  events: z.array(AuditEvent).default([]),          // outbox flush
+});
+
+// /jobs/poll response.
 export const PollResponse = z.object({
   job: Job.nullable(),
+  status: z.enum(["active", "awaiting_mapping", "paused"]),
   next_poll_seconds: z.number().int(),
   control_version: z.number().int(),
 });
@@ -1035,14 +1126,6 @@ export const Batch = z.object({
   ciphertext: z.string(),         // base64
   wrapped_data_key: z.string(),   // base64
   nonce: z.string(),              // base64
-});
-
-export const JobStatus = z.object({
-  job_id: z.string(),
-  status: z.enum(["success", "rejected", "failed", "timeout"]),
-  row_count: z.number().int().optional(),
-  new_watermark: z.number().int().optional(),
-  reason: z.string().optional(),
 });
 
 // Inferred types for free:
@@ -1077,7 +1160,7 @@ keyword/allowlist check is enough; production would parse to an AST. Either way 
 agent validates against the structured contract, not against the raw SQL alone.
 
 The audit rows and local sync-state records also get small schemas, but Job, Batch,
-Mapping, PollResponse, and JobStatus are the load-bearing ones.
+Mapping, PollRequest, PollResponse, and JobResult are the load-bearing ones.
 
 ---
 
