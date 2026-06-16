@@ -471,7 +471,7 @@ to the cloud, which writes the durable record:
 - cloud writes these plus its own (receipt at 15, processing/pause at 19-20) to the
   authoritative store.
 
-The agent keeps a **local outbox** (`state/store.js`) only as a buffer: if the cloud
+The agent keeps a **local outbox** (`state/store.ts`) only as a buffer: if the cloud
 is unreachable when an event happens, the event is held locally and **flushed on
 reconnect**. This is the same pattern as the spool — durable locally only until the
 cloud has it, then the cloud owns it. The local copy is disposable.
@@ -674,7 +674,7 @@ spool-and-resume) impress more than a second entity.
 # SQL Generation (the planner) — cloud-side
 
 The cloud writes the SQL. The agent never writes SQL; it runs what it is handed.
-Generation lives in `cloud/control/planner.js`. It is template + mapping + cursor.
+Generation lives in `cloud/control/planner.ts`. It is template + mapping + cursor.
 
 **Inputs (all cloud-side):**
 1. the mapping (entity → table, key, columns, strategy)
@@ -713,7 +713,7 @@ SELECT {key}, {return_marker}, {status_col} FROM {table} WHERE {key} IN (@open_i
   the next query.
 
 ```js
-// cloud/control/planner.js (shape)
+// cloud/control/planner.ts (shape)
 function generateJob(entity, mapping, syncState) {
   const m = mapping.entities[entity];
   const cols = m.columns.map(c => `[${c}]`).join(',');
@@ -759,32 +759,32 @@ Cloud proposes cadence; agent enforces local safety.
 ```
 agent/
 ├── src/
-│   ├── main.js                 # entry: setup-mode vs loop-mode branch
-│   ├── config.js               # load/save local config + identity
+│   ├── main.ts                 # entry: setup-mode vs loop-mode branch
+│   ├── config.ts               # load/save local config + identity
 │   │
 │   ├── setup/                  # runs once
-│   │   ├── enroll.js           # register with cloud, store cert/config
-│   │   ├── healthcheck.js      # connect + test-read SQL Server
-│   │   └── discovery.js        # probe schema -> inventory -> upload
+│   │   ├── enroll.ts           # register with cloud, store cert/config
+│   │   ├── healthcheck.ts      # connect + test-read SQL Server
+│   │   └── discovery.ts        # probe schema -> inventory -> upload
 │   │
 │   ├── sync/                   # the steady-state loop
-│   │   ├── loop.js             # one cycle: poll -> ... -> sleep(clamped interval)
-│   │   ├── poller.js           # calls control plane for jobs
-│   │   ├── validator.js        # THE SAFETY GATE (job checks + interval clamp)
-│   │   ├── executor.js         # runs bounded SQL read-only
-│   │   ├── changeDetector.js   # diff vs local state -> delta
-│   │   └── batcher.js          # build batch + sequence + metadata
+│   │   ├── loop.ts             # one cycle: poll -> ... -> sleep(clamped interval)
+│   │   ├── poller.ts           # calls control plane for jobs
+│   │   ├── validator.ts        # THE SAFETY GATE (job checks + interval clamp)
+│   │   ├── executor.ts         # runs bounded SQL read-only
+│   │   ├── changeDetector.ts   # diff vs local state -> delta
+│   │   └── batcher.ts          # build batch + sequence + metadata
 │   │
 │   ├── transport/              # leaving the building
-│   │   ├── crypto.js           # AES-GCM encrypt, wrap key
-│   │   ├── spool.js            # write/read/prune encrypted batches
-│   │   └── uploader.js         # POST to ingestion, handle ack/retry
+│   │   ├── crypto.ts           # AES-GCM encrypt, wrap key
+│   │   ├── spool.ts            # write/read/prune encrypted batches
+│   │   └── uploader.ts         # POST to ingestion, handle ack/retry
 │   │
 │   ├── state/
-│   │   └── store.js            # local persistence (watermarks, hashes, seq, audit)
+│   │   └── store.ts            # local persistence (watermarks, hashes, seq, audit)
 │   │
 │   └── db/
-│       └── sqlServer.js        # tedious connection wrapper (read-only)
+│       └── sqlServer.ts        # tedious connection wrapper (read-only)
 │
 └── package.json
 ```
@@ -794,10 +794,10 @@ Ships as a single `agent.exe` (Node SEA / pkg). Dependency flow is one-direction
 (crypto, spool, uploader) -> store`.
 
 Debrief map (one file per question):
-- "stop a bad cloud query?" -> `sync/validator.js`
-- "no data loss on network drop?" -> `transport/spool.js` + `uploader.js`
-- "schema discovery?" -> `setup/discovery.js`
-- "change detection?" -> `sync/changeDetector.js`
+- "stop a bad cloud query?" -> `sync/validator.ts`
+- "no data loss on network drop?" -> `transport/spool.ts` + `uploader.ts`
+- "schema discovery?" -> `setup/discovery.ts`
+- "change detection?" -> `sync/changeDetector.ts`
 
 ---
 
@@ -810,47 +810,47 @@ they are separate deployables. Shared seams to infra live in `shared/`.
 cloud/
 ├── src/
 │   ├── control/                # the control plane service
-│   │   ├── server.js           # express: enroll, discovery, jobs
+│   │   ├── server.ts           # express: enroll, discovery, jobs
 │   │   ├── routes/
-│   │   │   ├── enroll.js       # POST /enroll
-│   │   │   ├── discovery.js    # POST /discovery
-│   │   │   └── jobs.js         # POST /jobs/poll (report-and-fetch: result+health+events in, job out)
-│   │   ├── planner.js          # generates a job from mapping + sync state
-│   │   ├── scheduler.js        # computes next_poll_seconds per agent/entity
-│   │   └── mappingStore.js     # reads approved mappings (seeded)
+│   │   │   ├── enroll.ts       # POST /enroll
+│   │   │   ├── discovery.ts    # POST /discovery
+│   │   │   └── jobs.ts         # POST /jobs/poll (report-and-fetch: result+health+events in, job out)
+│   │   ├── planner.ts          # generates a job from mapping + sync state
+│   │   ├── scheduler.ts        # computes next_poll_seconds per agent/entity
+│   │   └── mappingStore.ts     # reads approved mappings (seeded)
 │   │
 │   ├── ingestion/              # the ingestion service
-│   │   ├── server.js           # express: batches
+│   │   ├── server.ts           # express: batches
 │   │   └── routes/
-│   │       └── batches.js      # POST /batches -> S3 + queue + ack
+│   │       └── batches.ts      # POST /batches -> S3 + queue + ack
 │   │
 │   ├── worker/                 # the async processor
-│   │   ├── worker.js           # loop: pull queue -> fetch -> decrypt -> apply
-│   │   ├── decryptor.js        # unwrap + AES-GCM decrypt (local key, no KMS)
-│   │   └── applier.js          # idempotent upsert/delete to read model
+│   │   ├── worker.ts           # loop: pull queue -> fetch -> decrypt -> apply
+│   │   ├── decryptor.ts        # unwrap + AES-GCM decrypt (local key, no KMS)
+│   │   └── applier.ts          # idempotent upsert/delete to read model
 │   │
 │   ├── shared/                 # used by all three
-│   │   ├── storage.js          # S3 put/get        (AWS)
-│   │   ├── queue.js            # SQS send/receive   (AWS)
-│   │   ├── audit.js            # write audit rows
-│   │   ├── readModel.js        # the portal's replicated DB
-│   │   └── db.js               # SQLite connection
+│   │   ├── storage.ts          # S3 put/get        (AWS)
+│   │   ├── queue.ts            # SQS send/receive   (AWS)
+│   │   ├── audit.ts            # write audit rows
+│   │   ├── readModel.ts        # the portal's replicated DB
+│   │   └── db.ts               # SQLite connection
 │   │
-│   └── config.js
+│   └── config.ts
 │
 ├── seed/
 │   └── mappings/maplewood.json # the pre-approved mapping
 └── package.json
 ```
 
-AWS footprint = exactly two files: `shared/storage.js` (S3) and `shared/queue.js`
+AWS footprint = exactly two files: `shared/storage.ts` (S3) and `shared/queue.ts`
 (SQS). Everything else local. Swapping local<->AWS is a one-file change. No KMS.
 
 Debrief map:
-- "where is query generation?" -> `control/planner.js`
-- "how is cadence controlled?" -> `control/scheduler.js`
-- "how is it idempotent / ordered?" -> `worker/applier.js`
-- "durable handoff?" -> `ingestion/routes/batches.js` + `shared/storage.js`
+- "where is query generation?" -> `control/planner.ts`
+- "how is cadence controlled?" -> `control/scheduler.ts`
+- "how is it idempotent / ordered?" -> `worker/applier.ts`
+- "durable handoff?" -> `ingestion/routes/batches.ts` + `shared/storage.ts`
 
 ---
 
@@ -887,62 +887,62 @@ Read top-to-bottom to see a request travel through the codebase.
 
 ## `POST /enroll`  (Step 2)
 ```
-agent: setup/enroll.js
+agent: setup/enroll.ts
    -> HTTP POST /enroll {code, csr}
-cloud: control/server.js -> routes/enroll.js
+cloud: control/server.ts -> routes/enroll.ts
    -> validate code, mint agent_id/cert, mark code consumed
-   -> shared/audit.js  (audit: enrolled)
+   -> shared/audit.ts  (audit: enrolled)
    <- {agent_id, tenant_id, cert, endpoints}
-agent: config.js  (persist cert + endpoints)
+agent: config.ts  (persist cert + endpoints)
 ```
 
 ## `POST /discovery`  (Steps 4-5)
 ```
-agent: setup/discovery.js
-   -> db/sqlServer.js  (query system catalog -> inventory)
+agent: setup/discovery.ts
+   -> db/sqlServer.ts  (query system catalog -> inventory)
    -> HTTP POST /discovery {inventory}
-cloud: control/server.js -> routes/discovery.js
+cloud: control/server.ts -> routes/discovery.ts
    -> store inventory; (human approves mapping, seeded for demo)
-   -> shared/audit.js  (audit: discovery_received)
+   -> shared/audit.ts  (audit: discovery_received)
 ```
 
 ## `POST /jobs/poll`  (Steps 7-8, 16-tail)  ← the heart of the loop (report-and-fetch)
 ```
-agent: sync/loop.js -> sync/poller.js
+agent: sync/loop.ts -> sync/poller.ts
    -> HTTP POST /jobs/poll { agent_id, last_result?, health, events[] }
-cloud: control/server.js -> routes/jobs.js
-   -> readModel.js      (apply last_result: advance cursor on success)
-   -> shared/audit.js   (write audit from last_result + events — authoritative)
-   -> scheduler.js      (read health -> compute next_poll_seconds)
-   -> mappingStore.js   (load approved mapping)
-   -> readModel.js      (read cloud query cursor)
-   -> planner.js        (template + mapping + cursor -> signed SQL job)
+cloud: control/server.ts -> routes/jobs.ts
+   -> readModel.ts      (apply last_result: advance cursor on success)
+   -> shared/audit.ts   (write audit from last_result + events — authoritative)
+   -> scheduler.ts      (read health -> compute next_poll_seconds)
+   -> mappingStore.ts   (load approved mapping)
+   -> readModel.ts      (read cloud query cursor)
+   -> planner.ts        (template + mapping + cursor -> signed SQL job)
    <- { job | null, status, next_poll_seconds }
-agent: sync/validator.js   (SAFETY GATE: signature/allowlist/limits/read-only)
-       sync/loop.js        (clamp next_poll_seconds 5..3600; stage next last_result)
+agent: sync/validator.ts   (SAFETY GATE: signature/allowlist/limits/read-only)
+       sync/loop.ts        (clamp next_poll_seconds 5..3600; stage next last_result)
 ```
 One round-trip does report + audit + cadence + fetch. No `/jobs/status` or `/events`.
 
 ## query execution + upload  (Steps 9-14)
 ```
-agent: sync/executor.js     (run bounded SQL via db/sqlServer.js)
-       sync/changeDetector.js (diff vs state/store.js -> delta)
-       sync/batcher.js      (delta + sequence + metadata -> batch)
-       transport/crypto.js  (AES-GCM encrypt, wrap key)
-       transport/spool.js   (write encrypted batch + seq, ONE txn)
-       transport/uploader.js (HTTP POST /batches)
+agent: sync/executor.ts     (run bounded SQL via db/sqlServer.ts)
+       sync/changeDetector.ts (diff vs state/store.ts -> delta)
+       sync/batcher.ts      (delta + sequence + metadata -> batch)
+       transport/crypto.ts  (AES-GCM encrypt, wrap key)
+       transport/spool.ts   (write encrypted batch + seq, ONE txn)
+       transport/uploader.ts (HTTP POST /batches)
 ```
 
 ## `POST /batches`  (Steps 14-16)
 ```
-agent: transport/uploader.js  -> HTTP POST /batches {ciphertext, meta}
-cloud: ingestion/server.js -> routes/batches.js
+agent: transport/uploader.ts  -> HTTP POST /batches {ciphertext, meta}
+cloud: ingestion/server.ts -> routes/batches.ts
    -> validate tenant/sequence/content_hash (idempotent on batch_id)
-   -> shared/storage.js   (S3 put under tenant/agent/entity/sequence)
-   -> shared/audit.js     (audit: receipt)
-   -> shared/queue.js     (SQS send: pointer to the object)
+   -> shared/storage.ts   (S3 put under tenant/agent/entity/sequence)
+   -> shared/audit.ts     (audit: receipt)
+   -> shared/queue.ts     (SQS send: pointer to the object)
    <- {status: stored}  (only AFTER durable S3 write)
-agent: transport/spool.js (prune), state/store.js (commit cursor AFTER ack)
+agent: transport/spool.ts (prune), state/store.ts (commit cursor AFTER ack)
 ```
 
 ## reporting results + events  (folded into the next `/jobs/poll`)
@@ -956,15 +956,15 @@ agent: transport/spool.js (prune), state/store.js (commit cursor AFTER ack)
 
 ## worker (no HTTP)  (Steps 17-20)
 ```
-cloud: worker/worker.js
-   -> shared/queue.js     (SQS receive -> object pointer)
-   -> shared/storage.js   (S3 get ciphertext)
-   -> worker/decryptor.js (AES-GCM decrypt, local key)
-   -> worker/applier.js   (check processed_batches + sequence;
-                           upsert/guarded-delete to readModel.js;
+cloud: worker/worker.ts
+   -> shared/queue.ts     (SQS receive -> object pointer)
+   -> shared/storage.ts   (S3 get ciphertext)
+   -> worker/decryptor.ts (AES-GCM decrypt, local key)
+   -> worker/applier.ts   (check processed_batches + sequence;
+                           upsert/guarded-delete to readModel.ts;
                            advance sync_stream_state)
-   -> shared/audit.js     (audit: processed OR paused)
-   -> shared/queue.js     (delete SQS message on success)
+   -> shared/audit.ts     (audit: processed OR paused)
+   -> shared/queue.ts     (delete SQS message on success)
 ```
 
 **One-line trace:** `poller -> jobs route -> planner -> validator -> executor ->
@@ -1171,9 +1171,9 @@ Not localhost — the agent (Windows sandbox) and cloud are separate boxes.
 **Run the cloud on an EC2 instance in the AWS sandbox.** Three processes:
 ```
 EC2 (in the sandbox VPC)
-├── node src/control/server.js     :3001
-├── node src/ingestion/server.js   :3002
-└── node src/worker/worker.js      (no port, polls SQS)
+├── node src/control/server.ts     :3001
+├── node src/ingestion/server.ts   :3002
+└── node src/worker/worker.ts      (no port, polls SQS)
 ```
 Keep them up with pm2 or tmux/screen.
 
