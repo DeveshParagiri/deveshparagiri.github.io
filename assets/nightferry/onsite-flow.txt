@@ -458,7 +458,13 @@ if no local config:
     # "awaiting_mapping" until a human approves the mapping, then "active"
     # with real jobs. See "From Enroll to Active". No separate wait step.
 
+flush_spool()   # on startup: re-upload any un-acked batches before new work
+
 while True:
+    # 1. FLUSH FIRST: clear any pending spool entries before taking new work.
+    #    A failed upload from a prior loop is retried here, oldest-first per stream.
+    flush_spool()                             # see "Failed Upload Handling"
+
     resp = poll_control()                     # Step 7-8  -> { job, next_poll_seconds }
     interval = clamp(resp.next_poll_seconds, 5, 3600)   # cloud sets cadence, agent clamps
     job = resp.job
@@ -466,23 +472,95 @@ while True:
         sleep(interval); continue
     if not validate(job):                     # Step 9  (safety gate)
         report_rejected(job); audit("rejected"); sleep(interval); continue
+
+    # 2. ORDERING GUARD: do not start new work for an entity that still has an
+    #    un-acked batch in the spool — its next sequence must not jump ahead.
+    if spool_has_pending(job.entity):
+        sleep(interval); continue             # flush_spool() above will catch up next loop
+
     rows = run_sql(job)                        # Step 10
     delta = diff_against_state(rows, job.entity)  # Step 11
     if delta.empty:
         report_success(job, 0); sleep(interval); continue
-    batch = build_batch(delta, job)           # Step 12
-    encrypt_and_spool(batch)                   # Step 13
+    batch = build_batch(delta, job)           # Step 12  (allocates the next sequence)
+    encrypt_and_spool(batch)                   # Step 13  (seq + batch in ONE txn)
+
     ack = upload(batch)                        # Step 14-15
     if ack.stored:
-        commit_state(job.entity, batch)        # Step 16  (AFTER ack)
+        commit_state(job.entity, batch)        # Step 16  (cursor advances ONLY here)
         prune_spool(batch)
         report_success(job, batch.row_count)   # reports new_watermark -> cloud advances cursor
         audit("uploaded")
     else:
-        audit("upload_failed")                 # spool stays, retry next loop
+        audit("upload_failed")                 # spool stays; cursor NOT advanced; flush next loop
     sleep(interval)
 
-# On startup, also: re-scan spool for any un-acked batches and re-upload first.
+
+# flush_spool(): per entity stream, upload pending batches in sequence order
+def flush_spool():
+    for entity in streams_with_pending_batches():
+        for batch in spool_pending(entity, order_by="sequence"):   # oldest first
+            ack = upload(batch)
+            if ack.stored:
+                commit_state(entity, batch); prune_spool(batch); audit("uploaded")
+            else:
+                audit("upload_failed"); break   # stop this stream, keep order; retry next loop
+```
+
+---
+
+# Failed Upload Handling
+
+A failed upload is not a special error path. The spool **is** the retry mechanism:
+a batch is never pruned until the cloud acks durable storage, so "failed" just means
+"still in the spool, try again."
+
+**Three failure cases, one mechanism.** All collapse to "re-upload; cloud dedupes by
+`batch_id`" (batch_id is position-based `tenant:agent:entity:sequence`, so a retry
+produces the identical id):
+1. Upload never reached the cloud (timeout/refused) -> re-upload is a fresh insert.
+2. Cloud stored it but the ack was lost -> retry hits the same batch_id -> cloud
+   returns the same ack ("already stored") -> agent prunes. (This is *why* batch_id
+   is deterministic, not random.)
+3. Agent crashed mid-upload -> `flush_spool()` on startup re-uploads it.
+
+**The gated-on-ack ordering (the correctness core).** On a failed upload the agent:
+- does NOT prune the spool entry
+- does NOT advance the cursor / `sync_stream_state`
+- does NOT bump to the next sequence
+- DOES write `upload_failed` to the outbox, leave everything as-is, and retry.
+
+If the cursor advanced on a failed upload, the next job would skip the un-uploaded
+rows -> permanent loss. Cursor advance and spool prune are both gated on the ack.
+
+**Per-stream blocking.** Batches are sequenced per entity, so a stuck Patrons seq 5
+must not be passed by seq 6. A pending batch **blocks its own stream** (the ordering
+guard skips new Patrons work) but **other streams continue** (Checkouts is
+independent). `flush_spool()` processes each stream oldest-first and stops that
+stream on the first failure to preserve order.
+
+**The spool entry is self-contained**, so a retry needs no DB re-read:
+```
+spool/maplewood-patrons-5.batch:
+  ciphertext, nonce, wrapped_data_key
+  batch_id, sequence, content_hash, metadata
+  status: pending | acked
+```
+Retry = read file, POST again. Zero production-DB impact on retry.
+
+**Retry timing (demo):** `flush_spool()` runs at the top of every loop, so the poll
+interval is the retry interval. Production could add a few quick backoff retries
+before deferring to the next loop.
+
+**Demo script (proves the guarantee live):**
+```
+1. agent syncing, spool empty
+2. block the cloud endpoint (kill network)
+3. agent runs a job, spools a batch, upload fails
+   -> show: 1 pending file in spool; cursor in sync_stream_state UNCHANGED
+4. restore network
+5. next loop -> flush_spool() uploads -> ack -> prune; cursor advances; read model updates
+6. no rows lost, no duplicates, no human intervention
 ```
 
 ---
