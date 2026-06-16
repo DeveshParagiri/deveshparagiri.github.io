@@ -145,6 +145,61 @@ If a required entity has no stable key, it is paused pending resolution.
 
 ---
 
+# From Enroll to Active (the poll state machine)
+
+There is a window between "enrolled" and "syncing": the agent has uploaded
+discovery, but a human has not yet approved the mapping, so no sync job can exist.
+This is handled without a special endpoint — **the agent starts polling immediately
+after discovery and never stops; the cloud answers based on the agent's state.**
+
+The control plane tracks a per-agent state:
+```
+ENROLLED    enrolled, discovery not done yet
+DISCOVERED  inventory uploaded, mapping NOT approved
+ACTIVE      mapping approved, sync jobs flow
+PAUSED      mapping issue or manual pause
+```
+
+The **same `/jobs/poll` endpoint** returns different things by state:
+```
+DISCOVERED (no mapping yet):
+  -> { job: null, status: "awaiting_mapping", next_poll_seconds: 30 }
+     (agent shows "waiting for Concourse setup"; cloud sets a slow wait cadence)
+
+ACTIVE:
+  -> { job: {...sync job...}, next_poll_seconds: 60 }
+
+PAUSED:
+  -> { job: null, status: "paused", next_poll_seconds: 120 }
+     (agent shows "needs support")
+```
+
+Sequence:
+```
+1. enroll      -> cloud marks ENROLLED
+2. discovery   -> inventory uploaded -> cloud marks DISCOVERED
+3. agent starts the poll loop immediately
+4. poll -> "awaiting_mapping, retry in 30s"   (repeats, slow cadence)
+5. [human approves mapping -> cloud flips agent to ACTIVE]
+6. next poll -> returns the FIRST sync job (full seed)
+7. normal loop
+```
+
+Two things fall out for free:
+- **No "am I ready?" endpoint.** The poll loop is the readiness check. One loop from
+  enroll onward; the cloud's answer drives the agent's status.
+- **The wait cadence is cloud-controlled.** While awaiting mapping the cloud sends a
+  high `next_poll_seconds`, so the agent idles politely instead of hammering. This
+  reuses the dynamic-polling mechanism — nothing new to build.
+
+**First ACTIVE job per entity is the full seed.** `sync_stream_state` for that entity
+is empty, so the planner generates a whole-table read (`key > 0`); the agent diffs
+against empty local state, everything is an insert, the first batch is the full
+table. After that it is incremental. No special-casing — the seed is just the
+incremental query with a zero cursor.
+
+---
+
 # ACT 3 — STEADY-STATE LOOP (every interval, e.g. 60s)
 
 ## Step 7 — Job poll
@@ -399,7 +454,9 @@ if no local config:
     enroll()              # Step 2
     health_check()        # Step 3
     discover_and_upload() # Step 4-5
-    # wait until cloud mapping approved -> jobs start flowing
+    # then fall straight into the poll loop below. The cloud answers
+    # "awaiting_mapping" until a human approves the mapping, then "active"
+    # with real jobs. See "From Enroll to Active". No separate wait step.
 
 while True:
     resp = poll_control()                     # Step 7-8  -> { job, next_poll_seconds }
