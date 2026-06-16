@@ -91,7 +91,7 @@ The agent executes accepted jobs with read-only credentials, query timeout, lock
 
 ## End-to-End Data Flow
 
-A normal cycle starts with the agent polling the control plane. If there is no work, it waits until the next poll. If there is a job, the agent validates the job and executes the bounded read query against SQL Server.
+A normal cycle starts with the agent polling the control plane. The poll is a report-and-fetch in one round-trip: the agent reports the previous job's result, its health, and any audit events it buffered during an outage, and the cloud responds with the next job and the next poll interval. There is no separate status or events endpoint. The cloud applies the reported result first, advancing the query cursor and writing audit, then returns the next job. If there is no work, the agent waits until the next poll. If there is a job, the agent validates it and executes the bounded read query against SQL Server.
 
 For small mutable entities such as Books, Patrons, Fines, and Holds, the cloud planner can issue snapshot-hash jobs. The query reads mapped business columns in pages. The agent compares returned rows against local key/hash state and emits inserts, updates, and guarded deletes.
 
@@ -127,13 +127,15 @@ This bounds the blast radius. A stolen upload credential may allow attempted imp
 
 The cloud planner chooses the sync strategy per entity, based on the approved mapping and observed schema. The agent executes the resulting jobs and maintains the local state required for those strategies.
 
-Small mutable tables can use snapshot plus keyed row-hash diff. The cloud sends bounded snapshot jobs. The agent computes hashes for mapped business columns and compares them to local state. New keys become inserts, changed hashes become updates, and missing keys become deletes only through guardrails.
+Small mutable tables can use snapshot plus keyed row-hash diff. Every job is bounded and paged, including the first seed, which is many bounded pages keyed on the stable key rather than one unbounded scan. The agent computes hashes for mapped business columns and compares them to local state. New keys become inserts and changed hashes become updates, emitted page by page. Deletes are different: a key missing from one page is not a delete, since it may appear on a later page, so deletes are only considered after a complete snapshot pass and then applied through mass-delete thresholds and quarantine.
 
 Large append-heavy tables use more targeted jobs. Checkouts are the main example. The cloud planner can send watermark jobs for new rows and open-set recheck jobs for currently open checkouts. The agent does not need to understand the business meaning of `LOST` or `RETURNED`; it executes the job and returns the rows. The mapping and planner decide which rows matter.
 
 Batches remain per entity stream. Each stream is identified by `tenant_id / agent_id / entity`, and each has its own sequence number. This preserves order where it matters while allowing other entities and tenants to continue if one stream pauses.
 
 Application is idempotent. The cloud stores processed batch ids, validates content hashes, uses upserts for inserts and updates, and applies deletes with thresholds. A repeated batch id with the same hash is a harmless retry. A repeated batch id with a different hash is quarantined. A duplicate queue message does not create duplicate portal rows.
+
+Cloud-side state is kept as three distinct concerns so they do not blur: a query cursor that records where the next read should start and drives query generation, a sequence-ordering record of the next expected and last applied sequence per stream, and the set of processed batch ids for idempotency. The agent holds only disposable local diff state, the row hashes and open set it needs to compute the next delta; if it is lost, the agent reseeds and cloud idempotency dedupes the re-send.
 
 Cross-entity references are eventually consistent. A checkout can briefly arrive before the full patron row it references. The read model should store stable external ids and tolerate short-lived unresolved references, while workers and monitoring alert if unresolved references persist or spike.
 

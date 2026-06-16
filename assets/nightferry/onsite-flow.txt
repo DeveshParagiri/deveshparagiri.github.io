@@ -159,11 +159,16 @@ Mapping (lives in cloud, shown for clarity):
       "stable_key": "CircID",
       "columns": ["CircID","BorrowerID","ItemID","CheckoutDate","DueDate","ReturnDate","Status"],
       "special_fields": {"return_marker": "ReturnDate"},
-      "strategy": "watermark_plus_open_set"
+      "strategy": "watermark",
+      "also": ["open_set_recheck"]
     }
   }
 }
 ```
+**Strategy = job mode.** An entity's `strategy` is its primary job mode; the optional
+`also` lists supplementary modes the planner issues for the same entity. Checkouts is
+`watermark` (new rows) plus an `open_set_recheck` pass (the `ReturnDate` mutation).
+The three modes are the only values: `snapshot_hash`, `watermark`, `open_set_recheck`.
 If a required entity has no stable key, it is paused pending resolution.
 
 > For the demo: seed this mapping JSON in the cloud service. The `/jobs` endpoint
@@ -274,6 +279,8 @@ so the cloud controls polling cadence centrally (see "Dynamic Polling" below).
     "mapping_version": 4,
     "job_version": 12,
     "mode": "snapshot_hash",
+    "table": "dbo.Borrowers",
+    "columns": ["BorrowerID","FullName","EmailAddr","Status"],
     "sql": "SELECT TOP (@page_size) [BorrowerID],[FullName],[EmailAddr],[Status] FROM [dbo].[Borrowers] WHERE [BorrowerID] > @cursor ORDER BY [BorrowerID]",
     "params": { "cursor": 0, "page_size": 500 },
     "limits": { "timeout_seconds": 5, "max_rows": 500, "max_bytes": 1048576 },
@@ -326,7 +333,7 @@ Reconcile each page against local diff state. Emit only the delta.
     stored key not seen is a candidate delete, applied through guardrails
     (mass-delete threshold + quarantine). Inserts/updates stream; deletes wait for a
     full pass.
-- `watermark_plus_open_set` (Checkouts): new rows via `CircID > watermark`;
+- Checkouts (`watermark` + `open_set_recheck`): new rows via `CircID > watermark`;
   recheck the tracked open set for `ReturnDate` null→set. (Append-heavy: hard deletes
   are rare and handled by infrequent full-key reconciliation, not per-page.)
 
@@ -443,8 +450,8 @@ KMS (cloud holds the private key).
 
 ## Step 20 — Idempotent application
 Apply delta to the read model: upserts for insert/update, guarded deletes
-(anomalous-share delete -> quarantine). Record `processed_batches`, advance
-`sync_stream_state`, write processing audit.
+(anomalous-share delete -> quarantine). Record the `batch_id` in `processed_batches`,
+advance `last_applied_sequence` (and `next_expected_sequence`), write processing audit.
 
 ## Step 21 — Serving
 Portal reads only from the read model, never the source DB. Eventually consistent
@@ -508,6 +515,20 @@ Three names, no overlap:
 - **cloud query cursor** — where to read from next (drives query generation).
 - **cloud apply state** — what's been applied and in what order (drives idempotency/ordering).
 - **agent local diff state** — fingerprints for change detection only.
+
+**Concrete fields** (one `sync_stream_state` row per `tenant/agent/entity`, plus a
+`processed_batches` table), so "advance sync_stream_state" is never ambiguous:
+```
+sync_stream_state (per stream):
+  accepted_cursor          -- query cursor: highest key the cloud has accepted; planner reads this
+  next_expected_sequence   -- ingestion/ordering: the sequence the worker expects next
+  last_applied_sequence    -- apply state: highest sequence written to the read model
+processed_batches:
+  (batch_id) -- idempotency: a batch_id present here is a no-op on retry
+```
+- query planning advances **accepted_cursor** (from the agent's reported `new_watermark`)
+- ordering checks/advances **next_expected_sequence**
+- read-model application advances **last_applied_sequence**
 
 The **agent local diff state is disposable**: if lost, the agent reseeds (re-pages
 the table) and cloud idempotency dedupes the re-send. The cloud cursor and apply
@@ -665,7 +686,7 @@ Stub / narrate (still inside the one .exe):
 - **Object-Lock** and the **mapping approval UI:** seed the mapping JSON cloud-side.
 
 Order: build one entity (Patrons, `snapshot_hash`) end-to-end first. Add Checkouts
-(`watermark_plus_open_set`) only if time remains. The failure cases (duplicate
+(`watermark` + `open_set_recheck`) only if time remains. The failure cases (duplicate
 upload idempotent, bad-signature job rejected, missing-sequence pause, network-drop
 spool-and-resume) impress more than a second entity.
 
@@ -700,9 +721,11 @@ SELECT TOP (@page_size) {columns} FROM {table} WHERE {key} > @watermark ORDER BY
 ```
 
 `open_set_recheck` — the single Checkouts mutation (`ReturnDate` null→set). Targets
-the agent-tracked open set in bounded chunks.
+the agent-tracked open set in bounded chunks (the agent supplies the open ids, the
+cloud bounds the chunk).
 ```sql
 SELECT {key}, {return_marker}, {status_col} FROM {table} WHERE {key} IN (@open_ids)
+-- @open_ids is a bounded chunk of the agent's tracked open set, capped at page_size
 ```
 
 **Decision rules:**
@@ -712,20 +735,27 @@ SELECT {key}, {return_marker}, {status_col} FROM {table} WHERE {key} IN (@open_i
   from the agent's reported `new_watermark`. Agent reports progress; cloud decides
   the next query.
 
-```js
-// cloud/control/planner.ts (shape)
-function generateJob(entity, mapping, syncState) {
+```ts
+// cloud/control/planner.ts (shape) — every template is bounded/paged
+function generateJob(entity: string, mapping: Mapping, cursor: number): Job {
   const m = mapping.entities[entity];
   const cols = m.columns.map(c => `[${c}]`).join(',');
   const table = `[${m.source_table.split('.').join('].[')}]`;
+  const key = `[${m.stable_key}]`;
   switch (m.strategy) {
     case 'snapshot_hash':
-      return makeJob(entity, m, `SELECT ${cols} FROM ${table} ORDER BY [${m.stable_key}]`, {});
+      return makeJob(entity, m,
+        `SELECT TOP (@page_size) ${cols} FROM ${table} WHERE ${key} > @cursor ORDER BY ${key}`,
+        { cursor, page_size: 500 });
     case 'watermark':
       return makeJob(entity, m,
-        `SELECT ${cols} FROM ${table} WHERE [${m.stable_key}] > @watermark ORDER BY [${m.stable_key}]`,
-        { watermark: syncState[entity].watermark ?? 0 });
-    // open_set_recheck similar
+        `SELECT TOP (@page_size) ${cols} FROM ${table} WHERE ${key} > @watermark ORDER BY ${key}`,
+        { watermark: cursor, page_size: 500 });
+    case 'open_set_recheck':
+      // open_ids = a bounded chunk of the agent-reported open set (capped at page_size)
+      return makeJob(entity, m,
+        `SELECT ${cols} FROM ${table} WHERE ${key} IN (@open_ids) ORDER BY ${key}`,
+        { open_ids: openIdsChunk, page_size: 500 });
   }
 }
 ```
@@ -747,7 +777,7 @@ push and no redeploy. The cadence rides the existing poll response.
 **Safety clamp (agent-side, same distrust boundary as job validation):** the agent
 does not blindly obey. It clamps to a local floor/ceiling so a bad value
 (`next_poll_seconds: 0`) cannot drive a tight loop against the library DB.
-```js
+```ts
 const interval = clamp(resp.next_poll_seconds, 5, 3600); // MIN 5s, MAX 1h
 ```
 Cloud proposes cadence; agent enforces local safety.
@@ -960,9 +990,9 @@ cloud: worker/worker.ts
    -> shared/queue.ts     (SQS receive -> object pointer)
    -> shared/storage.ts   (S3 get ciphertext)
    -> worker/decryptor.ts (AES-GCM decrypt, local key)
-   -> worker/applier.ts   (check processed_batches + sequence;
+   -> worker/applier.ts   (check processed_batches + next_expected_sequence;
                            upsert/guarded-delete to readModel.ts;
-                           advance sync_stream_state)
+                           advance last_applied_sequence + next_expected_sequence)
    -> shared/audit.ts     (audit: processed OR paused)
    -> shared/queue.ts     (delete SQS message on success)
 ```
@@ -993,7 +1023,7 @@ flawlessly.
 
 | Need | Library | Why this one |
 |---|---|---|
-| SQL Server driver | **`mssql`** (wraps `tedious`) | The standard Node SQL Server client. Pure JS, no system ODBC driver, bundles cleanly into the single `.exe`. Huge docs + examples. |
+| SQL Server driver | **`mssql`** (wraps `tedious`) | The standard Node SQL Server client. The driver is pure-JavaScript (no system ODBC dependency), so it bundles cleanly into the single `.exe`. Huge docs + examples. |
 | HTTP to cloud | **built-in `fetch`** (Node 18+) | No dependency at all. Use `undici` only if you need fancier control. |
 | Crypto (AES-GCM) | **built-in `node:crypto`** | No dependency. `createCipheriv('aes-256-gcm', ...)`. Well-documented core API. |
 | Local state + spool | **plain JSON files + a `spool/` folder** | Zero native deps -> bundles into the exe with no friction. (Avoid `better-sqlite3` on the agent: it's a native module and fights single-binary packaging.) |
@@ -1014,7 +1044,7 @@ flawlessly.
 ## Deliberately NOT used (and what to say)
 
 - **No KMS / `@aws-sdk/client-kms`** — local AES-GCM key for the demo. "Wrapped by KMS in production."
-- **No `pyodbc` / Python** — chose Node so the SQL Server driver (`mssql`/`tedious`) is pure-JS and the single-binary story is clean.
+- **No `pyodbc` / Python** — chose Node/TS so the SQL Server driver (`mssql`/`tedious`) is pure-JavaScript (no native ODBC dep) and the single-binary story is clean.
 - **No `better-sqlite3` on the agent** — native module fights `.exe` bundling; agent state is JSON files instead.
 - **No API Gateway / Lambda / ECS SDKs** — plain `express` on EC2. "Containers behind an ALB in production."
 - **No Terraform** — create the bucket/queue with the AWS CLI or console. Terraform steals time for no demo value.
@@ -1048,7 +1078,8 @@ export const Mapping = z.object({
     source_table: z.string(),
     stable_key: z.string(),
     columns: z.array(z.string()).min(1),
-    strategy: Strategy,
+    strategy: Strategy,                       // primary job mode
+    also: z.array(Strategy).default([]),      // supplementary modes (e.g. open_set_recheck)
     special_fields: z.record(z.string()).optional(),
   })),
 });
