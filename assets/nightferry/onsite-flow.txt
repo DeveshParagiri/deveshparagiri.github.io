@@ -344,15 +344,35 @@ and pause state; one paused stream does not block others.
 
 # Cross-cutting: Audit
 
-Not a single step — written at each transition, two tiers:
+**All authoritative audit lives in the cloud.** This is forced by the Dave
+constraint: nobody can read logs on the library server, so a local-only record is
+unreachable and worthless. Every auditable event must reach the cloud to count.
 
-- **Agent-side (local):** job received, job rejected (+reason), query executed,
-  batch uploaded, upload failed. Survives offline; proves the agent's safety calls.
-- **Cloud-side (authoritative):** receipt audit (15), processing/pause audit (19–20).
+The agent does not keep a separate authoritative audit. It **reports its events up**
+to the cloud, which writes the durable record:
 
-All records hold metadata only — ids, versions, counts, hashes, status,
-timestamps, error codes. **No raw patron PII.** Permanent tier is append-only with
+- agent events (job received, job **rejected** + reason, query executed, batch
+  uploaded, upload failed) -> reported via `POST /jobs/status` (and a small
+  `POST /events` for non-job events like enrollment and health transitions)
+- cloud writes these plus its own (receipt at 15, processing/pause at 19-20) to the
+  authoritative store.
+
+The agent keeps a **local outbox** (`state/store.js`) only as a buffer: if the cloud
+is unreachable when an event happens, the event is held locally and **flushed on
+reconnect**. This is the same pattern as the spool — durable locally only until the
+cloud has it, then the cloud owns it. The local copy is disposable.
+
+So the safety-gate demo ("agent rejected a malicious job") is proven by **querying
+the cloud audit**, not by reading a file on Dave's box. If the rejection happened
+offline, it lands in the cloud audit the moment the agent reconnects.
+
+All records hold metadata only — ids, versions, counts, hashes, status, timestamps,
+error codes. **No raw patron PII.** The permanent tier is append-only with
 hash-linked manifests (tamper-evident).
+
+> Pattern (said twice in this design): the cloud owns the durable truth; the agent
+> holds the minimum local state to survive an outage, then hands it off. Data uses
+> the spool; audit events use the outbox.
 
 ---
 
@@ -624,7 +644,9 @@ Control plane (`:3001`):
 POST /enroll        register agent, return cert + config
 POST /discovery     receive schema inventory
 POST /jobs/poll     return { job|null, next_poll_seconds } for an agent
-POST /jobs/status   agent reports job result (incl. new_watermark)
+POST /jobs/status   agent reports job result (incl. new_watermark) -> cloud audit
+POST /events        agent reports non-job audit events (enroll, health, rejects
+                    flushed from the local outbox after an outage) -> cloud audit
 GET  /health        sanity
 ```
 Ingestion (`:3002`):
@@ -697,12 +719,20 @@ cloud: ingestion/server.js -> routes/batches.js
 agent: transport/spool.js (prune), state/store.js (commit cursor AFTER ack)
 ```
 
-## `POST /jobs/status`  (Step 16 tail)
+## `POST /jobs/status`  (Step 16 tail)  + `POST /events`
 ```
-agent: sync/loop.js -> HTTP POST /jobs/status {job_id, new_watermark, ...}
+agent: sync/loop.js -> HTTP POST /jobs/status {job_id, status, new_watermark, reason?}
+       (status = success | rejected | failed | timeout)
+       state/store.js  (write to local OUTBOX first; if cloud unreachable, retry later)
 cloud: control/routes/jobs.js
-   -> readModel.js (advance sync_stream_state cursor)
-   -> shared/audit.js (audit: job_result)
+   -> readModel.js (advance sync_stream_state cursor on success)
+   -> shared/audit.js (audit: job_result / rejected / failed — authoritative)
+
+# non-job events (enroll, health transitions, outbox flush after outage):
+agent: -> HTTP POST /events {type, ...}
+cloud: control/routes/events.js -> shared/audit.js (authoritative)
+
+# On reconnect, the agent flushes any buffered outbox events to the cloud.
 ```
 
 ## worker (no HTTP)  (Steps 17-20)
