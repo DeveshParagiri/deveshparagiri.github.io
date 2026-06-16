@@ -1,0 +1,196 @@
+# Secure Data Sync Agent Architecture V2
+
+## Context, Goals, and Scope
+
+Maplewood Public Library runs its catalog and patron system on a legacy Windows Server with SQL Server. That database is the only operational copy of the library's books, patrons, checkouts, fines, and holds. Concourse is building a cloud-hosted patron portal, which needs selected data from that database without risking the library's day-to-day operations.
+
+The source SQL Server remains the system of record. The cloud database is a replicated read model for the portal. The portal may lag by a few minutes; it must never show corrupted data, apply changes out of order within a stream, or mix one patron's data with another's.
+
+The design still uses an outbound on-prem agent, because the library network allows no inbound connections. The V2 change is where query planning lives. Concourse owns the schema mapping, query generation, sync scheduling, pause/resume state, and reseed decisions in the cloud. The on-prem agent is a constrained executor: it polls Concourse for signed bounded query jobs, runs those jobs safely against SQL Server using read-only credentials, encrypts results before they leave the building, spools them locally, and uploads encrypted batches to Concourse.
+
+This keeps the agent simple without making it blind. It does not own tenant-specific business logic, but it still enforces local safety checks before touching the production database.
+
+## Architecture Overview
+
+The architecture has two cloud paths and one on-prem execution point.
+
+The control path answers what the agent should do. The agent polls the Concourse control plane over outbound HTTPS, and each poll response carries both the next unit of work and the next poll interval. The control plane responds with signed jobs such as run a Checkouts query, pause Holds, resume Patrons after mapping approval, perform a bounded reseed, rotate credentials, or upload diagnostics. Because the interval rides the poll response, Concourse controls polling cadence per tenant and entity without shipping a new binary, while the agent clamps the value to a local floor and ceiling so a bad interval cannot drive a tight loop against the library database.
+
+The data path receives what the agent found. After the agent executes a job, it turns the result into an encrypted batch, writes that batch to the local spool, and uploads it to the ingestion service. Ingestion stores the ciphertext durably, records receipt audit, and acknowledges only after durable receipt. Cloud workers later decrypt, validate, order, and apply the batch to the read model.
+
+The agent is deliberately not the business brain. It does not decide that `dbo.Borrowers` means Patrons, that `Status = LOST` is a terminal checkout state, or that Holds should pause because of a bad mapping. Those decisions live in Concourse. The agent's job is to execute approved work safely from inside the library network.
+
+The cloud is also not allowed to turn the agent into an unsafe remote SQL shell. Query jobs are signed, bounded, tied to an approved mapping version, and subject to agent-side safety checks. Even with read-only credentials, a bad query can hurt production by scanning huge tables or holding locks too long, so the agent can reject, clamp, time out, or back off from work that violates the local safety envelope.
+
+<!-- Figure 1: V2 system architecture diagram should show Agent polling Control Plane / Query Planner, and separately uploading encrypted batches to Ingestion. -->
+
+## Components and Responsibilities
+
+| Component | Responsibility |
+|---|---|
+| **SQL Server** *(source)* | Operational system of record. The agent uses read-only access only. |
+| **Sync Agent** *(on-prem)* | Polls for signed query jobs, validates safety, executes read-only SQL, encrypts results, writes the local spool, uploads batches, and sends heartbeats. |
+| **Local State & Spool** | Stores cached job metadata, watermarks, row hashes, open-checkout set, sequence numbers, retry state, and encrypted batches. |
+| **Control Plane / Query Planner** | Stores discovery reports, approved mappings, query jobs, poll schedules, pause/resume state, reseed jobs, versioning, and credential-rotation tasks. |
+| **ALB / Cloud Front Door** | Terminates mutual TLS and verifies the agent client certificate against the Concourse agent CA. |
+| **Ingestion Service** | Authenticates uploads, validates metadata, writes ciphertext to durable storage, records receipt audit, and returns acknowledgment. |
+| **S3 - Landing** | Durable encrypted batch landing zone under `tenant / agent / entity / sequence`. Replay source for failed processing. |
+| **SQS FIFO** | Ordered processing signal per `tenant / agent / entity` stream, while allowing parallel work across other streams. |
+| **Worker** | Loads stored batches, unwraps keys, decrypts, validates mapping and job versions, applies idempotent changes, and records processing audit. |
+| **KMS** | Holds decrypting key material. The agent receives only public wrapping material and never a persistent decrypt key. |
+| **RDS - Read Model** | Tenant-scoped Postgres read model for the portal, with `processed_batches` and `sync_stream_state`. |
+| **Audit Store** | Queryable audit rows plus immutable, hash-linked Object-Lock manifests for contractual evidence. |
+| **Monitoring** | Tracks agent health, lag, version drift, job failures, spool pressure, paused streams, and support codes. |
+
+## Schema Discovery, Mapping, and Approval
+
+Schema discovery begins on the agent because the agent is the only component that can see the library SQL Server. During setup, after Dave enters the SQL Server connection details, the agent connects with the same read-only account it will use later and runs metadata queries against SQL Server catalog views. It reports visible tables, columns, data types, primary keys, indexes, row counts or estimates, candidate timestamp columns, candidate `rowversion` columns, and likely entity matches.
+
+That discovery report goes to the Concourse control plane. It is not the final sync configuration. It is an inventory of what the agent can safely see.
+
+Concourse then approves a tenant-specific mapping. The mapping says which source tables represent each canonical entity, which stable key identifies rows, which source columns are allowed to leave the library, which fields are special, and which change strategy is appropriate. For example, it may say that `dbo.Borrowers.BorrowerID` is the stable key for Patrons, or that Checkouts use `dbo.Circulation.CircID` as the key and `ReturnDate IS NULL` plus `Status` values to identify open and terminal states.
+
+Dave does not edit this mapping. Operationally, the approved mapping lives in Concourse's cloud control plane as versioned tenant configuration, not a hand-edited `config.yml` on the library server. The agent never receives the mapping itself. It receives the signed jobs the cloud generates from that mapping, so interpretation stays in the cloud and the agent only ever executes finished, bounded work. The agent caches only what it needs to keep operating through a brief control-plane outage, such as the last signed jobs and an allowlist for safety validation, while the source of truth for mapping and approval is always the cloud.
+
+A stable key is required for normal incremental sync. Without a primary key or Concourse-approved natural key, updates and deletes are ambiguous. The safe behavior is to pause that entity during onboarding until Concourse, the library, or the vendor identifies a reliable identity rule.
+
+## Query Jobs and SQL Execution
+
+V2 makes the query ownership boundary explicit. The cloud owns query planning and query generation. The agent owns constrained local execution.
+
+After a mapping is approved, the control plane's query planner generates signed query jobs from that mapping. A job is tied to a tenant, agent, entity, mapping version, job version, and safety envelope. It can contain a parameterized SQL statement or a structured query description generated by Concourse. Either way, the job is bounded and explicit: projected columns, source table, predicate, parameters, row limit, byte limit, timeout, and expected result shape.
+
+An example job for new Checkouts might be:
+
+```json
+{
+  "job_id": "job-789",
+  "tenant_id": "maplewood",
+  "agent_id": "agent-123",
+  "entity": "checkouts",
+  "mapping_version": 4,
+  "job_version": 12,
+  "sql": "SELECT TOP (@page_size) [CircID], [BorrowerID], [ItemID], [CheckoutDate], [DueDate], [ReturnDate], [Status] FROM [dbo].[Circulation] WHERE [CircID] > @watermark ORDER BY [CircID]",
+  "params": {
+    "watermark": 9000,
+    "page_size": 500
+  },
+  "limits": {
+    "timeout_seconds": 5,
+    "max_rows": 500,
+    "max_bytes": 1048576
+  }
+}
+```
+
+The agent polls for jobs over outbound HTTPS. It verifies the job signature, tenant binding, agent binding, mapping version, expiration time, and safety limits. It rejects jobs that are unsigned, expired, for the wrong agent, reference unapproved tables or columns, contain write statements, contain multiple statements, lack a row limit, exceed local maximums, or arrive while local health checks say the server is under pressure.
+
+This is the important balance. Concourse can centrally change business logic, polling cadence, checkout semantics, reseed behavior, and per-tenant queries without shipping a new binary. The agent remains a production safety gate and does not blindly execute arbitrary SQL.
+
+The agent executes accepted jobs with read-only credentials, query timeout, lock timeout, bounded page size, and streaming reads. Results are transformed into the batch format specified by the job and mapping version. The agent reports job success, failure, timeout, row count, byte count, and source watermark back to the control plane.
+
+## End-to-End Data Flow
+
+A normal cycle starts with the agent polling the control plane. If there is no work, it waits until the next poll. If there is a job, the agent validates the job and executes the bounded read query against SQL Server.
+
+For small mutable entities such as Books, Patrons, Fines, and Holds, the cloud planner can issue snapshot-hash jobs. The query reads mapped business columns in pages. The agent compares returned rows against local key/hash state and emits inserts, updates, and guarded deletes.
+
+For Checkouts, the cloud planner issues jobs that match the approved mapping. New checkout rows can be fetched with a monotonic key or existing `rowversion`. Open checkout recheck jobs can target the locally tracked open-checkout set in bounded chunks. The meaning of open, returned, lost, cancelled, or archived comes from the approved mapping, not from hardcoded agent logic.
+
+Detected changes become a batch for one tenant, agent, entity, and sequence number. The batch also carries mapping version, job version, row count, source watermark, and content hash. Sequence allocation and spool write happen together locally, so a crash before commit allocates nothing and a crash after commit leaves a durable encrypted batch to retry.
+
+Before upload, the agent creates a per-batch data key in memory, encrypts the payload, wraps that data key with Concourse public encryption material, and discards the raw data key. The local spool stores ciphertext and retry metadata. If the internet fails, the agent keeps retrying later. If the spool approaches its disk budget, the agent stops accepting more local read work and reports backlog pressure.
+
+The agent uploads the encrypted batch over outbound HTTPS using its client certificate. Ingestion authenticates the agent, validates tenant binding, revocation state, batch id, job version, mapping version, and content hash, then writes the ciphertext to object storage. Only after durable storage does it return acknowledgment. That acknowledgment means Concourse has custody of the encrypted batch; it does not mean the portal read model has applied it.
+
+Once a batch lands, a FIFO queue message points workers to the stored object. Workers process batches in order within each `tenant / agent / entity` stream. They decrypt through KMS, validate shape and sequence, apply idempotent upserts and guarded deletes to the read model, record `processed_batches`, update `sync_stream_state`, and write processing audit. A validation failure, missing sequence, unexpected mapping version, or unsafe delete pauses the affected stream and alerts Concourse.
+
+The result is still at-least-once delivery from the agent and exactly-once effect in the cloud. The agent can retry uploads freely, while the cloud deduplicates by batch id and content hash and applies batches idempotently.
+
+<!-- Figure 2: Batch lifecycle diagram should add the control-plane poll and signed query job before local SQL execution. -->
+
+## Security and Credential Model
+
+The model separates agent identity from data confidentiality. The agent proves who it is with a client certificate. Synced data is protected with envelope encryption so only Concourse can decrypt it.
+
+Enrollment establishes the agent identity. Concourse issues a short-lived enrollment code for a specific library. Dave enters it in the wizard. The agent generates a local keypair and sends a certificate signing request. Concourse returns a signed client certificate and initial bootstrap configuration. Future calls to the control plane and ingestion use mutual TLS, and Concourse maps the certificate to a specific `agent_id` and `tenant_id`.
+
+The agent private key prefers the Windows machine certificate store marked non-exportable, with a DPAPI-protected fallback file if needed. Certificates rotate before expiry, and Concourse can revoke compromised agents immediately through the control plane.
+
+Query jobs are also signed and versioned. This prevents a local attacker or network intermediary from injecting fake work. The agent validates signatures, job expiration, tenant binding, agent binding, mapping version, row limits, and SQL safety before execution.
+
+Data protection uses envelope encryption. Each batch gets a fresh data key in memory. The payload is encrypted locally, the data key is wrapped with Concourse public material, and the decrypting private key remains in KMS or an HSM-backed equivalent. The local spool stores ciphertext only. The cloud landing bucket, read model, and audit store also use provider encryption at rest.
+
+This bounds the blast radius. A stolen upload credential may allow attempted impersonation until revoked, but it does not decrypt historical local batches. A bad cloud job cannot run if it fails the agent's local safety envelope. A compromised read-only database account can read only what SQL Server permits, and the agent further limits what it sends to the mapped job result.
+
+## Sync Strategy, Ordering, and Idempotency
+
+The cloud planner chooses the sync strategy per entity, based on the approved mapping and observed schema. The agent executes the resulting jobs and maintains the local state required for those strategies.
+
+Small mutable tables can use snapshot plus keyed row-hash diff. The cloud sends bounded snapshot jobs. The agent computes hashes for mapped business columns and compares them to local state. New keys become inserts, changed hashes become updates, and missing keys become deletes only through guardrails.
+
+Large append-heavy tables use more targeted jobs. Checkouts are the main example. The cloud planner can send watermark jobs for new rows and open-set recheck jobs for currently open checkouts. The agent does not need to understand the business meaning of `LOST` or `RETURNED`; it executes the job and returns the rows. The mapping and planner decide which rows matter.
+
+Batches remain per entity stream. Each stream is identified by `tenant_id / agent_id / entity`, and each has its own sequence number. This preserves order where it matters while allowing other entities and tenants to continue if one stream pauses.
+
+Application is idempotent. The cloud stores processed batch ids, validates content hashes, uses upserts for inserts and updates, and applies deletes with thresholds. A repeated batch id with the same hash is a harmless retry. A repeated batch id with a different hash is quarantined. A duplicate queue message does not create duplicate portal rows.
+
+Cross-entity references are eventually consistent. A checkout can briefly arrive before the full patron row it references. The read model should store stable external ids and tolerate short-lived unresolved references, while workers and monitoring alert if unresolved references persist or spike.
+
+## Audit Trail
+
+Every sync operation produces audit records for what happened, when, by which agent or service, and with what result. The system records both successes and failures, because rejected jobs, failed validations, paused streams, and quarantined batches are operationally important.
+
+The control plane records job audit: who approved a mapping, which plan generated a job, when the agent received it, whether the agent accepted or rejected it, and why. The ingestion service records receipt audit after durable storage. Workers record processing audit after validation and read-model application.
+
+Queryable audit lives in Postgres as append-only operational rows. It stores metadata such as tenant id, agent id, entity, job id, batch id, sequence number, mapping version, job version, timestamps, actor or service, row counts, content hash, source watermark, status, and error code. It avoids raw patron PII.
+
+Permanent audit lives in Object-Lock manifests with hash links. This is the contractual layer. Postgres audit is convenient but not tamper-proof against a privileged database administrator. The locked manifest chain makes alteration detectable against the permanent record.
+
+## Deployment and Operations
+
+The operator experience remains wizard-first. Dave receives one signed Windows `.exe`, double-clicks it, enters database connection details and the Concourse enrollment code, and watches setup tests. There is no CLI, Docker, runtime install, or hand-edited config file.
+
+The setup wizard tests SQL connectivity, read permissions, metadata discovery, cloud reachability, enrollment, and agent identity. After enrollment, the service can sit in a waiting state while Concourse approves the mapping and enables query jobs.
+
+Day to day, the Windows service starts on boot and polls the control plane over outbound HTTPS. It receives jobs, runs safe reads, spools encrypted batches, retries uploads, sends heartbeats, renews credentials, and reports health. The local UI stays simple: healthy, syncing, waiting for Concourse setup, or needs support. If something fails beyond Dave's reach, the UI shows a support code that Concourse can resolve against cloud diagnostics.
+
+Updates can remain manual for the first version. Heartbeats include agent version and supported job protocol version, so Concourse can detect drift and avoid sending jobs the installed agent cannot safely execute.
+
+## Scaling and Performance
+
+The V2 design scales by centralizing orchestration and keeping local execution bounded. Concourse can retune poll intervals, page sizes, reseed jobs, pause states, and entity strategies per tenant without shipping a new binary. The agent still enforces local ceilings so cloud-side changes cannot overload SQL Server.
+
+On the library server, every job has maximum rows, bytes, timeout, and local health checks. Reads stream results rather than loading whole tables into memory. The spool has a disk budget, and when it approaches that budget the agent pauses new read jobs and reports pressure rather than filling the server disk.
+
+In the cloud, object storage is partitioned by tenant, agent, entity, and sequence or date. SQS FIFO preserves order inside one entity stream while allowing workers to scale across other streams. KMS work is bounded to one unwrap per batch. Postgres maintains `processed_batches` and `sync_stream_state` so replay and duplicate queue messages do not create duplicate effects.
+
+The main tradeoff remains freshness versus production safety. The control plane can ask for frequent polling, but the agent may slow down if SQL Server is busy, queries are timing out, or local spool pressure is high. The system prefers a slightly stale portal over a sync process that risks the library's only operational database.
+
+## Scope Boundaries
+
+This design covers outbound replication from the library SQL Server into a Concourse-operated cloud read model. It does not make the cloud the operational system of record.
+
+There is no write-back to the legacy system in this path. Online payments or other cloud-originated actions require a separate command and reconciliation workflow, because they create new source-of-truth and failure semantics.
+
+The agent does not alter the source database. It can use existing `rowversion`, timestamp columns, or SQL Server Change Tracking where they already exist and are approved. It does not enable features, create triggers, add tables, or add indexes.
+
+The cloud can orchestrate and generate read jobs, but the agent is not a general-purpose remote shell. Jobs are signed, bounded, versioned, and constrained to read-only execution with local safety enforcement.
+
+## Risk Register
+
+The risks below are ranked by severity, taken as impact multiplied by likelihood. Each maps to a constraint in the brief and to a mitigation built into the design.
+
+| Rank | Risk | Severity | Why It Matters | Mitigation |
+|---:|---|---|---|---|
+| 1 | Agent harms production SQL Server | Critical | The database is the only operational copy; expensive reads could affect checkouts. | Read-only account, signed bounded jobs, max rows/bytes, query and lock timeouts, local health backoff. |
+| 2 | Cloud-generated query is wrong or unsafe | Critical | Centralized query planning is powerful and can over-read or misread data if unchecked. | Mapping approval, job signing, table/column allowlists, agent-side validation, no writes, no unbounded jobs. |
+| 3 | Data lost or duplicated on network failure | Critical | The modem is unreliable; retries must not corrupt the portal. | Durable encrypted spool, atomic batch/sequence write, idempotent cloud application, replayable acknowledgments. |
+| 4 | Encryption or credential model compromised | Critical | Patron PII must stay encrypted, with no decrypt key on-prem. | Envelope encryption, private key in KMS, mTLS identity, non-exportable local key storage, revocation. |
+| 5 | Wrong schema mapping syncs wrong data | High | Legacy schemas are messy; a bad mapping can mix or omit fields. | Discovery report, Concourse approval, versioned mappings, job-version validation, pause on mismatch. |
+| 6 | Changes missed from weak source metadata | High | Legacy tables may lack reliable timestamps or `rowversion`. | Per-entity strategies, snapshot hash, watermark jobs, open-checkout jobs, reseed and reconciliation support. |
+| 7 | Delete detection removes too much | High | A partial read could look like many rows vanished. | Delete thresholds, quarantine, audit, and Concourse resolution before applying large delete batches. |
+| 8 | Poison job or batch blocks a stream | High | A bad job or batch could leave the portal stale. | Per-entity streams, stream pause, alerting, dead-letter handling, replay from durable storage. |
+| 9 | Audit trail incomplete or not defensible | High | The contract requires permanent sync records. | Job, receipt, and processing audit; append-only rows; Object-Lock hash-linked manifests. |
+| 10 | Dave cannot install or recover the agent | Medium | The operator cannot debug logs or edit config. | Signed wizard installer, simple states, support codes, cloud diagnostics. |
+| 11 | Larger tenants exceed pilot assumptions | Medium | The design must scale beyond Maplewood. | Cloud-side retuning, bounded jobs, tenant/entity partitioning, worker scaling, lag monitoring. |
