@@ -15,7 +15,9 @@ HTTPS; the library network never accepts inbound connections.
 - **Mapping** — cloud-only config translating the library's schema to canonical entities. The agent never receives it; the cloud bakes it into jobs.
 - **Job** — a single bounded, signed query instruction the cloud sends the agent.
 - **Batch** — encrypted set of changed rows the agent uploads for one entity + sequence.
-- **Sync state** — agent-local bookkeeping (watermarks, row hashes, sequence, open-checkout set). Disposable; reseeds if lost.
+- **Agent local diff state** — agent-only fingerprints (row hashes, open-checkout set) used to compute the delta. Disposable; reseeds if lost.
+- **Cloud query cursor** — per-entity read position (watermark / page) in `sync_stream_state`. Cloud-owned; drives query generation.
+- **Cloud apply state** — processed batch ids + last applied sequence (`processed_batches`, `sync_stream_state`). Cloud-owned; drives idempotency and ordering.
 - **Audit** — durable record of events. Authoritative copy is cloud-side.
 
 ---
@@ -192,11 +194,15 @@ Two things fall out for free:
   high `next_poll_seconds`, so the agent idles politely instead of hammering. This
   reuses the dynamic-polling mechanism — nothing new to build.
 
-**First ACTIVE job per entity is the full seed.** `sync_stream_state` for that entity
-is empty, so the planner generates a whole-table read (`key > 0`); the agent diffs
-against empty local state, everything is an insert, the first batch is the full
-table. After that it is incremental. No special-casing — the seed is just the
-incremental query with a zero cursor.
+**First ACTIVE job per entity is the full seed — paged, not one scan.** Every job is
+bounded (row limit, timeout), including the seed. A full seed means *many bounded
+pages until complete*, not a single unbounded table read. `sync_stream_state` starts
+at a zero cursor; each page reads `key > @cursor ORDER BY key` with a `page_size`,
+the agent advances the cursor by the last key seen, and the planner keeps issuing
+pages until a short page signals the end. The agent diffs each page against local
+state and everything is an insert. After the seed completes, the same bounded paging
+continues incrementally. No special-casing — the seed is just the incremental query
+starting at a zero cursor.
 
 ---
 
@@ -228,8 +234,8 @@ so the cloud controls polling cadence centrally (see "Dynamic Polling" below).
     "mapping_version": 4,
     "job_version": 12,
     "mode": "snapshot_hash",
-    "sql": "SELECT [BorrowerID],[FullName],[EmailAddr],[Status] FROM [dbo].[Borrowers] ORDER BY [BorrowerID]",
-    "params": { "page_size": 500 },
+    "sql": "SELECT TOP (@page_size) [BorrowerID],[FullName],[EmailAddr],[Status] FROM [dbo].[Borrowers] WHERE [BorrowerID] > @cursor ORDER BY [BorrowerID]",
+    "params": { "cursor": 0, "page_size": 500 },
     "limits": { "timeout_seconds": 5, "max_rows": 500, "max_bytes": 1048576 },
     "allowlist": { "tables": ["dbo.Borrowers"], "columns": ["BorrowerID","FullName","EmailAddr","Status"] },
     "expires_at": "2026-06-17T14:35:00Z",
@@ -264,19 +270,25 @@ Rejection (audited locally + reported up):
 
 ## Step 10 — Query execution
 Agent runs the accepted job read-only with timeout, lock timeout, page size,
-streamed reads. First run for an entity returns the full set (full seed);
-later runs return the windowed set the predicate defines.
+streamed reads. Every job is bounded; the seed is many bounded pages until complete,
+not one scan. Later runs return the windowed set the predicate defines.
 
-## Step 11 — Change detection (agent-side sync state)
-Reconcile result against local sync state. Emit only the delta.
+## Step 11 — Change detection (agent-side diff state)
+Reconcile each page against local diff state. Emit only the delta.
 
 - `snapshot_hash` (Patrons/Holds/Fines/Books): compute per-key hash over mapped
   columns, compare to stored hashes.
-  - new key  -> insert
-  - changed hash -> update
-  - missing key  -> delete (guarded downstream)
+  - new key  -> insert     (emit page by page)
+  - changed hash -> update (emit page by page)
+  - **deletes are NOT inferred from a single page.** A key missing from page 3 is not
+    a delete — it may be on page 4. Deletes are only considered after a **complete
+    snapshot pass**: collect the full set of seen keys across all pages, then any
+    stored key not seen is a candidate delete, applied through guardrails
+    (mass-delete threshold + quarantine). Inserts/updates stream; deletes wait for a
+    full pass.
 - `watermark_plus_open_set` (Checkouts): new rows via `CircID > watermark`;
-  recheck the tracked open set for `ReturnDate` null→set.
+  recheck the tracked open set for `ReturnDate` null→set. (Append-heavy: hard deletes
+  are rare and handled by infrequent full-key reconciliation, not per-page.)
 
 Delta example:
 ```json
@@ -354,10 +366,10 @@ after ack** — never on upload — so a lost upload never skips data.
 No ack (network failure 14↔15) -> spool entry stays -> re-uploaded next loop ->
 cloud idempotency makes the retry harmless. No loss, no manual step.
 
-Status report back to control (light). The `new_watermark` is how the cloud's
-planner advances the cursor — the agent reports progress, the cloud stores it in
-`sync_stream_state` and uses it to generate the next job. The cloud owns the
-cursor; the agent reports it.
+Status report back to control (light). The `new_watermark` is how the cloud advances
+the **cloud query cursor** — the agent reports progress, the cloud stores it in
+`sync_stream_state` and uses it to generate the next job. The cloud owns the cursor;
+the agent only reports progress against it.
 ```json
 { "job_id": "job-789", "status": "success", "row_count": 3, "new_watermark": 31 }
 ```
@@ -433,17 +445,26 @@ hash-linked manifests (tamper-evident).
 
 # Where state lives (the boundary)
 
-| Thing | Lives | Why |
-|---|---|---|
-| Mapping (schema → entities) | Cloud | interpretation; central, versioned; agent never sees it |
-| Job generation / SQL authoring | Cloud | needs the mapping |
-| Ordering, idempotency, sequence validation | Cloud | correctness enforced where the environment is controlled |
-| Authoritative audit | Cloud | permanent, tamper-evident |
-| Sync state (watermark, row hashes, open set, sequence) | Agent | only the agent can see the source to diff against |
-| Safety validation of incoming jobs | Agent | protects the on-prem DB; agent must not blindly trust the cloud |
+Three distinct kinds of state, named clearly so they don't blur:
 
-Agent sync state is **disposable**: if lost, the agent reseeds (full read) and
-cloud idempotency dedupes the re-send. Durable truth is all cloud-side.
+| State | Name | Lives | Why |
+|---|---|---|---|
+| Mapping (schema → entities) | — | Cloud | interpretation; central, versioned; agent never sees it |
+| Job generation / SQL authoring | — | Cloud | needs the mapping |
+| **Query cursor** (watermark / page position per entity) | **cloud query cursor** | Cloud (`sync_stream_state`) | the cloud authors the next query, so it owns where to read from; advanced from the agent's reported progress |
+| **Apply + sequence state** (processed batch ids, last applied sequence) | **cloud apply state** | Cloud (`processed_batches`, `sync_stream_state`) | ordering + idempotency enforced where the env is controlled |
+| Authoritative audit | — | Cloud | permanent, tamper-evident |
+| **Row hashes + open-set** (last-seen fingerprints for diffing) | **agent local diff state** | Agent | only the agent can see the source to diff against |
+| Safety validation of incoming jobs | — | Agent | protects the on-prem DB; agent must not blindly trust the cloud |
+
+Three names, no overlap:
+- **cloud query cursor** — where to read from next (drives query generation).
+- **cloud apply state** — what's been applied and in what order (drives idempotency/ordering).
+- **agent local diff state** — fingerprints for change detection only.
+
+The **agent local diff state is disposable**: if lost, the agent reseeds (re-pages
+the table) and cloud idempotency dedupes the re-send. The cloud cursor and apply
+state are the durable truth.
 
 ---
 
@@ -598,22 +619,24 @@ Generation lives in `cloud/control/planner.js`. It is template + mapping + curso
 
 **Inputs (all cloud-side):**
 1. the mapping (entity → table, key, columns, strategy)
-2. the entity's sync state (the cursor, e.g. last watermark) from `sync_stream_state`
+2. the **cloud query cursor** (per-entity read position, e.g. last watermark) from `sync_stream_state`
 3. the strategy (which template)
 
-**Templates (the whole of "generation"):**
+**Every template is bounded (paged).** No template is an unbounded scan — even the
+snapshot reads in pages keyed on the stable key, so the seed is many bounded pages.
 
 `snapshot_hash` — small mutable tables (Patrons, Holds, Fines, Books). No reliable
-watermark, so read the whole (small) table and let the agent diff locally.
+watermark, so page the table by key and let the agent diff locally.
 ```sql
-SELECT {columns} FROM {table} ORDER BY {key}
+SELECT TOP (@page_size) {columns} FROM {table} WHERE {key} > @cursor ORDER BY {key}
 -- never SELECT * : always the mapped columns, to avoid noisy diffs and data leak
+-- pages until a short page; deletes only after a COMPLETE pass (see Step 11)
 ```
 
 `watermark` — append-heavy with a monotonic key (Checkouts new rows). The cloud
-injects the cursor from sync state.
+injects the cursor from the cloud query cursor.
 ```sql
-SELECT {columns} FROM {table} WHERE {key} > @watermark ORDER BY {key}
+SELECT TOP (@page_size) {columns} FROM {table} WHERE {key} > @watermark ORDER BY {key}
 -- params.watermark comes from sync_stream_state (0 on first run = full seed)
 ```
 
@@ -977,7 +1000,10 @@ export const Job = z.object({
   mapping_version: z.number().int(),
   job_version: z.number().int(),
   mode: Strategy,
-  sql: z.string(),
+  // structured fields — the source of truth the SQL must conform to:
+  table: z.string(),
+  columns: z.array(z.string()).min(1),
+  sql: z.string(),                // must reference only `table` + `columns`, read-only
   params: z.record(z.union([z.string(), z.number()])),
   limits: z.object({
     timeout_seconds: z.number().positive(),
@@ -1032,6 +1058,7 @@ const job = Job.parse(resp.job);          // throws on malformed job
 assertReadOnly(job.sql);                  // no INSERT/UPDATE/DELETE/DDL/multi-stmt
 assertAllowlisted(job);                   // tables/columns in allowlist
 assertLimits(job.limits);                 // within local maximums
+assertSqlMatchesFields(job);              // SQL references only job.entity's table + job.columns
 
 // cloud ingestion — reject garbage at the door
 const batch = Batch.parse(req.body);
@@ -1039,6 +1066,15 @@ const batch = Batch.parse(req.body);
 // cloud startup — fail loudly on a bad seeded mapping
 const mapping = Mapping.parse(JSON.parse(readFileSync("seed/mappings/maplewood.json")));
 ```
+
+**The job carries structured fields, not just a SQL string.** This is what makes the
+agent a *safety gate* rather than a fragile SQL parser. The `Job` includes `entity`,
+the source `table`, the `columns`, `strategy`, `params`, and `limits` — and the
+agent's check is "does the SQL reference only this table and these columns, read-only,
+within these limits?" not "let me fully parse arbitrary SQL." The structured fields
+are the source of truth; the SQL must conform to them. For the demo, a
+keyword/allowlist check is enough; production would parse to an AST. Either way the
+agent validates against the structured contract, not against the raw SQL alone.
 
 The audit rows and local sync-state records also get small schemas, but Job, Batch,
 Mapping, PollResponse, and JobStatus are the load-bearing ones.
