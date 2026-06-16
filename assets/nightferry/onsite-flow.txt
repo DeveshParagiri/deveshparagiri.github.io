@@ -1,0 +1,914 @@
+# Onsite Build — End-to-End Flow (Step 0 → 22)
+
+Working reference for the build. Describes what happens, in order, plus the
+on-the-wire payloads. Two-channel model: **control** (`/jobs`, light metadata)
+and **data** (`/batches`, encrypted payload). All agent calls are outbound over
+HTTPS; the library network never accepts inbound connections.
+
+---
+
+## Vocabulary
+
+- **Control plane** — cloud service the agent polls for work and reports status to.
+- **Ingestion** — cloud endpoint that receives encrypted batches, stores them, acks.
+- **Worker** — cloud process that decrypts a stored batch and applies it to the read model.
+- **Mapping** — cloud-only config translating the library's schema to canonical entities. The agent never receives it; the cloud bakes it into jobs.
+- **Job** — a single bounded, signed query instruction the cloud sends the agent.
+- **Batch** — encrypted set of changed rows the agent uploads for one entity + sequence.
+- **Sync state** — agent-local bookkeeping (watermarks, row hashes, sequence, open-checkout set). Disposable; reseeds if lost.
+- **Audit** — durable record of events. Authoritative copy is cloud-side.
+
+---
+
+# ACT 1 — INSTALL & SETUP (one-time)
+
+## Step 0 — Provisioning
+Concourse issues Dave the agent binary and a single-use, short-lived enrollment
+code scoped to one tenant.
+
+```
+code:   MAPLE-7X9K-2233
+tenant: maplewood   (bound to the code, not entered by Dave)
+```
+
+## Step 1 — Operator input
+Dave runs the binary and provides SQL connection params + the enrollment code.
+In production this is a 4-field wizard; for the build it is CLI flags / prompts.
+
+```
+sql_host, sql_db, sql_auth (sql|windows), sql_user, sql_password, enrollment_code
+```
+
+## Step 2 — Enrollment
+Agent generates a keypair locally and registers. Private key never leaves the box.
+Enrollment is idempotent: a retry with the same public key returns the same cert.
+
+**Agent → Control `POST /enroll`**
+```json
+{
+  "enrollment_code": "MAPLE-7X9K-2233",
+  "csr": "<base64 PEM certificate signing request>",
+  "agent_pubkey_fingerprint": "sha256:ab12..."
+}
+```
+
+**Control → Agent `200`**
+```json
+{
+  "agent_id": "agent-123",
+  "tenant_id": "maplewood",
+  "client_certificate": "<base64 PEM signed cert>",
+  "endpoints": {
+    "control": "https://cloud.concourse/api/control",
+    "ingestion": "https://cloud.concourse/api/ingestion"
+  },
+  "protocol_version": 1
+}
+```
+Agent persists cert + config locally. Code marked consumed cloud-side.
+All later calls use this cert over mTLS.
+
+## Step 3 — Health check
+Agent connects to SQL Server with the read-only creds and runs a trivial read.
+
+```
+ok        -> status: healthy
+auth fail -> status: needs_support, reason: auth_failed
+no read   -> status: needs_support, reason: no_read_permission
+no host   -> status: needs_support, reason: host_unreachable
+```
+Surfaces problems during setup, while Dave is present.
+
+---
+
+# ACT 2 — DISCOVERY & MAPPING (one-time)
+
+## Step 4 — Schema discovery
+Agent queries SQL Server system catalog. Reports what exists; interprets nothing.
+
+Produces an inventory:
+```json
+{
+  "tables": [
+    {
+      "name": "dbo.Borrowers",
+      "row_estimate": 30,
+      "primary_key": ["BorrowerID"],
+      "columns": [
+        {"name": "BorrowerID", "type": "int", "nullable": false},
+        {"name": "FullName",   "type": "nvarchar", "nullable": false},
+        {"name": "EmailAddr",  "type": "nvarchar", "nullable": true},
+        {"name": "Status",     "type": "varchar",  "nullable": false}
+      ],
+      "candidate_watermarks": ["BorrowerID"],
+      "rowversion_columns": []
+    }
+  ]
+}
+```
+
+## Step 5 — Inventory upload
+**Agent → Control `POST /discovery`** — body is the inventory above.
+Raw observation, not a sync config.
+
+## Step 6 — Mapping approval (cloud-only)
+Concourse derives + approves a versioned, tenant-specific mapping. Stored in the
+control plane. **The agent never receives the mapping.** The cloud uses it to
+generate jobs.
+
+Mapping (lives in cloud, shown for clarity):
+```json
+{
+  "tenant_id": "maplewood",
+  "mapping_version": 4,
+  "entities": {
+    "patrons": {
+      "source_table": "dbo.Borrowers",
+      "stable_key": "BorrowerID",
+      "columns": ["BorrowerID", "FullName", "EmailAddr", "Status"],
+      "strategy": "snapshot_hash"
+    },
+    "checkouts": {
+      "source_table": "dbo.Circulation",
+      "stable_key": "CircID",
+      "columns": ["CircID","BorrowerID","ItemID","CheckoutDate","DueDate","ReturnDate","Status"],
+      "special_fields": {"return_marker": "ReturnDate"},
+      "strategy": "watermark_plus_open_set"
+    }
+  }
+}
+```
+If a required entity has no stable key, it is paused pending resolution.
+
+> For the demo: seed this mapping JSON in the cloud service. The `/jobs` endpoint
+> reads it to fill in the SQL template.
+
+---
+
+# ACT 3 — STEADY-STATE LOOP (every interval, e.g. 60s)
+
+## Step 7 — Job poll
+Agent makes an authenticated outbound request for work. Outbound-only = no inbound
+access needed.
+
+**Agent → Control `POST /jobs/poll`**
+```json
+{ "agent_id": "agent-123", "tenant_id": "maplewood", "supported_protocol": 1 }
+```
+
+## Step 8 — Job issuance
+Control plane generates a signed job from the mapping + the entity's current sync
+state (the planner — see "SQL Generation" below). Cloud authors the SQL; agent
+receives it finished and bounded. The response also carries `next_poll_seconds`,
+so the cloud controls polling cadence centrally (see "Dynamic Polling" below).
+
+**Control → Agent `200`**
+```json
+{
+  "job": {
+    "job_id": "job-789",
+    "tenant_id": "maplewood",
+    "agent_id": "agent-123",
+    "entity": "patrons",
+    "mapping_version": 4,
+    "job_version": 12,
+    "mode": "snapshot_hash",
+    "sql": "SELECT [BorrowerID],[FullName],[EmailAddr],[Status] FROM [dbo].[Borrowers] ORDER BY [BorrowerID]",
+    "params": { "page_size": 500 },
+    "limits": { "timeout_seconds": 5, "max_rows": 500, "max_bytes": 1048576 },
+    "allowlist": { "tables": ["dbo.Borrowers"], "columns": ["BorrowerID","FullName","EmailAddr","Status"] },
+    "expires_at": "2026-06-17T14:35:00Z",
+    "signature": "hmac-sha256:9f2c..."
+  },
+  "next_poll_seconds": 60,
+  "control_version": 7
+}
+```
+If there is no work, `job` is `null` (agent just sleeps `next_poll_seconds`).
+A `watermark` job (e.g. Checkouts) instead carries `"params": { "watermark": 9000, "page_size": 500 }`,
+where the cloud injects the watermark from its `sync_stream_state` (see "SQL Generation").
+
+## Step 9 — Job validation (safety gate, agent-side)
+Agent validates before executing. Any failure → reject + audit + continue.
+
+Checks:
+```
+- signature valid (HMAC for demo)
+- tenant_id and agent_id match this agent
+- not expired (expires_at)
+- mapping_version is one the agent will accept
+- SQL is a single read-only statement (no INSERT/UPDATE/DELETE/DDL, no ';' multi-stmt)
+- every referenced table/column is in allowlist
+- limits present and within local maximums (max_rows, timeout, max_bytes)
+- local health ok (SQL Server not already under pressure)
+```
+Rejection (audited locally + reported up):
+```json
+{ "job_id": "job-789", "status": "rejected", "reason": "table_not_in_allowlist" }
+```
+
+## Step 10 — Query execution
+Agent runs the accepted job read-only with timeout, lock timeout, page size,
+streamed reads. First run for an entity returns the full set (full seed);
+later runs return the windowed set the predicate defines.
+
+## Step 11 — Change detection (agent-side sync state)
+Reconcile result against local sync state. Emit only the delta.
+
+- `snapshot_hash` (Patrons/Holds/Fines/Books): compute per-key hash over mapped
+  columns, compare to stored hashes.
+  - new key  -> insert
+  - changed hash -> update
+  - missing key  -> delete (guarded downstream)
+- `watermark_plus_open_set` (Checkouts): new rows via `CircID > watermark`;
+  recheck the tracked open set for `ReturnDate` null→set.
+
+Delta example:
+```json
+{
+  "inserts": [ {"BorrowerID": 31, "FullName": "A. Lee", "EmailAddr": "a@x.org", "Status": "ACTIVE"} ],
+  "updates": [ {"BorrowerID": 12, "FullName": "J. Doe", "EmailAddr": "j2@x.org", "Status": "ACTIVE"} ],
+  "deletes": [ 27 ]
+}
+```
+
+## Step 12 — Batch construction
+Pack the delta with metadata + a per-stream sequence number.
+
+```json
+{
+  "batch_id": "maplewood:agent-123:patrons:5",
+  "tenant_id": "maplewood",
+  "agent_id": "agent-123",
+  "entity": "patrons",
+  "sequence": 5,
+  "mapping_version": 4,
+  "job_version": 12,
+  "row_count": 3,
+  "source_watermark": 31,
+  "content_hash": "sha256:7be1...",
+  "payload": "<plaintext delta, about to be encrypted>"
+}
+```
+`batch_id` is position-based (`tenant:agent:entity:sequence`). `content_hash`
+is a separate integrity check.
+
+## Step 13 — Encrypt + spool
+- generate ephemeral per-batch data key in memory
+- encrypt payload (AES-GCM)
+- wrap data key with cloud public material
+- write {encrypted batch + sequence} to local spool in ONE transaction
+- discard raw data key
+
+Crash before commit -> nothing allocated. Crash after -> durable batch to retry.
+
+## Step 14 — Upload
+**Agent → Ingestion `POST /batches`** (mTLS)
+```json
+{
+  "batch_id": "maplewood:agent-123:patrons:5",
+  "tenant_id": "maplewood",
+  "agent_id": "agent-123",
+  "entity": "patrons",
+  "sequence": 5,
+  "mapping_version": 4,
+  "content_hash": "sha256:7be1...",
+  "wrapped_data_key": "<base64>",
+  "ciphertext": "<base64 AES-GCM blob>",
+  "nonce": "<base64>"
+}
+```
+
+## Step 15 — Durable receipt + ack
+Ingestion authenticates, validates tenant binding / revocation / batch_id /
+sequence / content_hash, writes ciphertext to object storage under
+`tenant/agent/entity/sequence`, records receipt audit, then acks AFTER durable write.
+
+**Ingestion → Agent `200`**
+```json
+{ "batch_id": "maplewood:agent-123:patrons:5", "status": "stored" }
+```
+- same batch_id + same hash -> same ack (idempotent retry)
+- same batch_id + different hash -> `409 quarantined`
+
+## Step 16 — Spool prune + state commit
+On ack: prune the spool entry (after a short retention) AND commit new sync state
+(advance watermark, overwrite row hashes, bump sequence). **State commits only
+after ack** — never on upload — so a lost upload never skips data.
+
+No ack (network failure 14↔15) -> spool entry stays -> re-uploaded next loop ->
+cloud idempotency makes the retry harmless. No loss, no manual step.
+
+Status report back to control (light). The `new_watermark` is how the cloud's
+planner advances the cursor — the agent reports progress, the cloud stores it in
+`sync_stream_state` and uses it to generate the next job. The cloud owns the
+cursor; the agent reports it.
+```json
+{ "job_id": "job-789", "status": "success", "row_count": 3, "new_watermark": 31 }
+```
+
+---
+
+# ACT 4 — CLOUD PROCESSING (asynchronous)
+
+## Step 17 — Processing signal
+Durable write enqueues a FIFO message keyed on `tenant/agent/entity`, pointing to
+the stored object.
+```json
+{ "object_key": "maplewood/agent-123/patrons/5", "batch_id": "maplewood:agent-123:patrons:5", "sequence": 5 }
+```
+
+## Step 18 — Worker pickup
+Worker consumes the message, fetches ciphertext from object storage, decrypts via
+KMS (cloud holds the private key).
+
+## Step 19 — Validation + ordering
+- already in `processed_batches`? -> skip (idempotent)
+- sequence == next expected for this stream? -> if not, PAUSE stream + alert
+- mapping_version current? -> if not, PAUSE stream + alert
+
+## Step 20 — Idempotent application
+Apply delta to the read model: upserts for insert/update, guarded deletes
+(anomalous-share delete -> quarantine). Record `processed_batches`, advance
+`sync_stream_state`, write processing audit.
+
+## Step 21 — Serving
+Portal reads only from the read model, never the source DB. Eventually consistent
+(minutes), ordered, isolated, never corrupt. Source DB untouched.
+
+## Step 22 — Continuation
+Loop returns to Step 7. Each entity is an independent stream with its own sequence
+and pause state; one paused stream does not block others.
+
+---
+
+# Cross-cutting: Audit
+
+Not a single step — written at each transition, two tiers:
+
+- **Agent-side (local):** job received, job rejected (+reason), query executed,
+  batch uploaded, upload failed. Survives offline; proves the agent's safety calls.
+- **Cloud-side (authoritative):** receipt audit (15), processing/pause audit (19–20).
+
+All records hold metadata only — ids, versions, counts, hashes, status,
+timestamps, error codes. **No raw patron PII.** Permanent tier is append-only with
+hash-linked manifests (tamper-evident).
+
+---
+
+# Where state lives (the boundary)
+
+| Thing | Lives | Why |
+|---|---|---|
+| Mapping (schema → entities) | Cloud | interpretation; central, versioned; agent never sees it |
+| Job generation / SQL authoring | Cloud | needs the mapping |
+| Ordering, idempotency, sequence validation | Cloud | correctness enforced where the environment is controlled |
+| Authoritative audit | Cloud | permanent, tamper-evident |
+| Sync state (watermark, row hashes, open set, sequence) | Agent | only the agent can see the source to diff against |
+| Safety validation of incoming jobs | Agent | protects the on-prem DB; agent must not blindly trust the cloud |
+
+Agent sync state is **disposable**: if lost, the agent reseeds (full read) and
+cloud idempotency dedupes the re-send. Durable truth is all cloud-side.
+
+---
+
+# Loop pseudocode (build target)
+
+```
+if no local config:
+    enroll()              # Step 2
+    health_check()        # Step 3
+    discover_and_upload() # Step 4-5
+    # wait until cloud mapping approved -> jobs start flowing
+
+while True:
+    resp = poll_control()                     # Step 7-8  -> { job, next_poll_seconds }
+    interval = clamp(resp.next_poll_seconds, 5, 3600)   # cloud sets cadence, agent clamps
+    job = resp.job
+    if not job:
+        sleep(interval); continue
+    if not validate(job):                     # Step 9  (safety gate)
+        report_rejected(job); audit("rejected"); sleep(interval); continue
+    rows = run_sql(job)                        # Step 10
+    delta = diff_against_state(rows, job.entity)  # Step 11
+    if delta.empty:
+        report_success(job, 0); sleep(interval); continue
+    batch = build_batch(delta, job)           # Step 12
+    encrypt_and_spool(batch)                   # Step 13
+    ack = upload(batch)                        # Step 14-15
+    if ack.stored:
+        commit_state(job.entity, batch)        # Step 16  (AFTER ack)
+        prune_spool(batch)
+        report_success(job, batch.row_count)   # reports new_watermark -> cloud advances cursor
+        audit("uploaded")
+    else:
+        audit("upload_failed")                 # spool stays, retry next loop
+    sleep(interval)
+
+# On startup, also: re-scan spool for any un-acked batches and re-upload first.
+```
+
+---
+
+# Demo scope (cut list)
+
+Build: enroll, health, discovery, poll, validate, execute, diff, encrypt, spool,
+upload, ack, prune, worker apply, audit rows.
+
+The agent always ships as a single `agent.exe` (Node + SEA/pkg). That is the
+single-binary constraint and it holds regardless of the input interface.
+
+Stub / narrate (still inside the one .exe):
+- **Input collection:** take Dave's 4 inputs (sql host/db/creds, enrollment code)
+  via console flags/prompts tomorrow, not a GUI window. Production pops a 4-field
+  wizard here; same .exe, same underlying logic. (Optional cheap upgrade if time:
+  the .exe starts a localhost server and opens a 4-field HTML form in the browser.)
+- **Real cert:** HMAC-sign jobs for the demo instead of full CSR/mTLS.
+- **KMS:** AES-GCM with a local key, "wrapped by KMS in prod".
+- **Windows service wrapper:** run the .exe as a console process; service install
+  is the packaging step.
+- **Object-Lock** and the **mapping approval UI:** seed the mapping JSON cloud-side.
+
+Order: build one entity (Patrons, `snapshot_hash`) end-to-end first. Add Checkouts
+(`watermark_plus_open_set`) only if time remains. The failure cases (duplicate
+upload idempotent, bad-signature job rejected, missing-sequence pause, network-drop
+spool-and-resume) impress more than a second entity.
+
+---
+
+# SQL Generation (the planner) — cloud-side
+
+The cloud writes the SQL. The agent never writes SQL; it runs what it is handed.
+Generation lives in `cloud/control/planner.js`. It is template + mapping + cursor.
+
+**Inputs (all cloud-side):**
+1. the mapping (entity → table, key, columns, strategy)
+2. the entity's sync state (the cursor, e.g. last watermark) from `sync_stream_state`
+3. the strategy (which template)
+
+**Templates (the whole of "generation"):**
+
+`snapshot_hash` — small mutable tables (Patrons, Holds, Fines, Books). No reliable
+watermark, so read the whole (small) table and let the agent diff locally.
+```sql
+SELECT {columns} FROM {table} ORDER BY {key}
+-- never SELECT * : always the mapped columns, to avoid noisy diffs and data leak
+```
+
+`watermark` — append-heavy with a monotonic key (Checkouts new rows). The cloud
+injects the cursor from sync state.
+```sql
+SELECT {columns} FROM {table} WHERE {key} > @watermark ORDER BY {key}
+-- params.watermark comes from sync_stream_state (0 on first run = full seed)
+```
+
+`open_set_recheck` — the single Checkouts mutation (`ReturnDate` null→set). Targets
+the agent-tracked open set in bounded chunks.
+```sql
+SELECT {key}, {return_marker}, {status_col} FROM {table} WHERE {key} IN (@open_ids)
+```
+
+**Decision rules:**
+- `WHERE` clause is decided by `strategy` (which lives in the mapping).
+- `SELECT *` never happens — always the mapped column list.
+- Cursor value (`@watermark`) is owned by the cloud (`sync_stream_state`), advanced
+  from the agent's reported `new_watermark`. Agent reports progress; cloud decides
+  the next query.
+
+```js
+// cloud/control/planner.js (shape)
+function generateJob(entity, mapping, syncState) {
+  const m = mapping.entities[entity];
+  const cols = m.columns.map(c => `[${c}]`).join(',');
+  const table = `[${m.source_table.split('.').join('].[')}]`;
+  switch (m.strategy) {
+    case 'snapshot_hash':
+      return makeJob(entity, m, `SELECT ${cols} FROM ${table} ORDER BY [${m.stable_key}]`, {});
+    case 'watermark':
+      return makeJob(entity, m,
+        `SELECT ${cols} FROM ${table} WHERE [${m.stable_key}] > @watermark ORDER BY [${m.stable_key}]`,
+        { watermark: syncState[entity].watermark ?? 0 });
+    // open_set_recheck similar
+  }
+}
+```
+
+---
+
+# Dynamic Polling (cloud controls cadence)
+
+The cloud controls how often the agent polls, per tenant and per entity, with no
+push and no redeploy. The cadence rides the existing poll response.
+
+- Every `/jobs/poll` response carries `next_poll_seconds`.
+- The agent sleeps that long, then polls again.
+- The cloud can speed up patron data, slow catalog data, back off during
+  maintenance, or surge to drain a backlog after an outage.
+- If the agent reports SQL Server under pressure (in `/jobs/status`), the cloud
+  responds with a larger `next_poll_seconds` — central throttle.
+
+**Safety clamp (agent-side, same distrust boundary as job validation):** the agent
+does not blindly obey. It clamps to a local floor/ceiling so a bad value
+(`next_poll_seconds: 0`) cannot drive a tight loop against the library DB.
+```js
+const interval = clamp(resp.next_poll_seconds, 5, 3600); // MIN 5s, MAX 1h
+```
+Cloud proposes cadence; agent enforces local safety.
+
+---
+
+# Library-Side Code Structure (the agent) — Node
+
+```
+agent/
+├── src/
+│   ├── main.js                 # entry: setup-mode vs loop-mode branch
+│   ├── config.js               # load/save local config + identity
+│   │
+│   ├── setup/                  # runs once
+│   │   ├── enroll.js           # register with cloud, store cert/config
+│   │   ├── healthcheck.js      # connect + test-read SQL Server
+│   │   └── discovery.js        # probe schema -> inventory -> upload
+│   │
+│   ├── sync/                   # the steady-state loop
+│   │   ├── loop.js             # one cycle: poll -> ... -> sleep(clamped interval)
+│   │   ├── poller.js           # calls control plane for jobs
+│   │   ├── validator.js        # THE SAFETY GATE (job checks + interval clamp)
+│   │   ├── executor.js         # runs bounded SQL read-only
+│   │   ├── changeDetector.js   # diff vs local state -> delta
+│   │   └── batcher.js          # build batch + sequence + metadata
+│   │
+│   ├── transport/              # leaving the building
+│   │   ├── crypto.js           # AES-GCM encrypt, wrap key
+│   │   ├── spool.js            # write/read/prune encrypted batches
+│   │   └── uploader.js         # POST to ingestion, handle ack/retry
+│   │
+│   ├── state/
+│   │   └── store.js            # local persistence (watermarks, hashes, seq, audit)
+│   │
+│   └── db/
+│       └── sqlServer.js        # tedious connection wrapper (read-only)
+│
+└── package.json
+```
+
+Ships as a single `agent.exe` (Node SEA / pkg). Dependency flow is one-directional:
+`main -> loop -> (poller, validator, executor, changeDetector, batcher) ->
+(crypto, spool, uploader) -> store`.
+
+Debrief map (one file per question):
+- "stop a bad cloud query?" -> `sync/validator.js`
+- "no data loss on network drop?" -> `transport/spool.js` + `uploader.js`
+- "schema discovery?" -> `setup/discovery.js`
+- "change detection?" -> `sync/changeDetector.js`
+
+---
+
+# Cloud-Side Code Structure — Node
+
+Three distinct concerns (control plane, ingestion, worker) because in production
+they are separate deployables. Shared seams to infra live in `shared/`.
+
+```
+cloud/
+├── src/
+│   ├── control/                # the control plane service
+│   │   ├── server.js           # express: enroll, discovery, jobs
+│   │   ├── routes/
+│   │   │   ├── enroll.js       # POST /enroll
+│   │   │   ├── discovery.js    # POST /discovery
+│   │   │   └── jobs.js         # POST /jobs/poll, /jobs/status
+│   │   ├── planner.js          # generates a job from mapping + sync state
+│   │   ├── scheduler.js        # computes next_poll_seconds per agent/entity
+│   │   └── mappingStore.js     # reads approved mappings (seeded)
+│   │
+│   ├── ingestion/              # the ingestion service
+│   │   ├── server.js           # express: batches
+│   │   └── routes/
+│   │       └── batches.js      # POST /batches -> S3 + queue + ack
+│   │
+│   ├── worker/                 # the async processor
+│   │   ├── worker.js           # loop: pull queue -> fetch -> decrypt -> apply
+│   │   ├── decryptor.js        # unwrap + AES-GCM decrypt (local key, no KMS)
+│   │   └── applier.js          # idempotent upsert/delete to read model
+│   │
+│   ├── shared/                 # used by all three
+│   │   ├── storage.js          # S3 put/get        (AWS)
+│   │   ├── queue.js            # SQS send/receive   (AWS)
+│   │   ├── audit.js            # write audit rows
+│   │   ├── readModel.js        # the portal's replicated DB
+│   │   └── db.js               # SQLite connection
+│   │
+│   └── config.js
+│
+├── seed/
+│   └── mappings/maplewood.json # the pre-approved mapping
+└── package.json
+```
+
+AWS footprint = exactly two files: `shared/storage.js` (S3) and `shared/queue.js`
+(SQS). Everything else local. Swapping local<->AWS is a one-file change. No KMS.
+
+Debrief map:
+- "where is query generation?" -> `control/planner.js`
+- "how is cadence controlled?" -> `control/scheduler.js`
+- "how is it idempotent / ordered?" -> `worker/applier.js`
+- "durable handoff?" -> `ingestion/routes/batches.js` + `shared/storage.js`
+
+---
+
+# API Endpoints (full list)
+
+Control plane (`:3001`):
+```
+POST /enroll        register agent, return cert + config
+POST /discovery     receive schema inventory
+POST /jobs/poll     return { job|null, next_poll_seconds } for an agent
+POST /jobs/status   agent reports job result (incl. new_watermark)
+GET  /health        sanity
+```
+Ingestion (`:3002`):
+```
+POST /batches       receive encrypted batch -> S3 -> SQS -> ack
+```
+Worker: no HTTP. Pulls SQS, needs no inbound.
+
+---
+
+# Request Lifecycle Through the Code
+
+Each endpoint mapped to the files it touches and the flow steps it implements.
+Read top-to-bottom to see a request travel through the codebase.
+
+## `POST /enroll`  (Step 2)
+```
+agent: setup/enroll.js
+   -> HTTP POST /enroll {code, csr}
+cloud: control/server.js -> routes/enroll.js
+   -> validate code, mint agent_id/cert, mark code consumed
+   -> shared/audit.js  (audit: enrolled)
+   <- {agent_id, tenant_id, cert, endpoints}
+agent: config.js  (persist cert + endpoints)
+```
+
+## `POST /discovery`  (Steps 4-5)
+```
+agent: setup/discovery.js
+   -> db/sqlServer.js  (query system catalog -> inventory)
+   -> HTTP POST /discovery {inventory}
+cloud: control/server.js -> routes/discovery.js
+   -> store inventory; (human approves mapping, seeded for demo)
+   -> shared/audit.js  (audit: discovery_received)
+```
+
+## `POST /jobs/poll`  (Steps 7-8)  ← the heart of the loop
+```
+agent: sync/loop.js -> sync/poller.js
+   -> HTTP POST /jobs/poll {agent_id}
+cloud: control/server.js -> routes/jobs.js
+   -> mappingStore.js   (load approved mapping)
+   -> readModel.js      (read sync_stream_state -> cursor/watermark)
+   -> planner.js        (template + mapping + cursor -> signed SQL job)
+   -> scheduler.js      (compute next_poll_seconds)
+   <- { job | null, next_poll_seconds }
+agent: sync/validator.js   (SAFETY GATE: signature/allowlist/limits/read-only)
+       sync/loop.js        (clamp next_poll_seconds 5..3600)
+```
+
+## query execution + upload  (Steps 9-14)
+```
+agent: sync/executor.js     (run bounded SQL via db/sqlServer.js)
+       sync/changeDetector.js (diff vs state/store.js -> delta)
+       sync/batcher.js      (delta + sequence + metadata -> batch)
+       transport/crypto.js  (AES-GCM encrypt, wrap key)
+       transport/spool.js   (write encrypted batch + seq, ONE txn)
+       transport/uploader.js (HTTP POST /batches)
+```
+
+## `POST /batches`  (Steps 14-16)
+```
+agent: transport/uploader.js  -> HTTP POST /batches {ciphertext, meta}
+cloud: ingestion/server.js -> routes/batches.js
+   -> validate tenant/sequence/content_hash (idempotent on batch_id)
+   -> shared/storage.js   (S3 put under tenant/agent/entity/sequence)
+   -> shared/audit.js     (audit: receipt)
+   -> shared/queue.js     (SQS send: pointer to the object)
+   <- {status: stored}  (only AFTER durable S3 write)
+agent: transport/spool.js (prune), state/store.js (commit cursor AFTER ack)
+```
+
+## `POST /jobs/status`  (Step 16 tail)
+```
+agent: sync/loop.js -> HTTP POST /jobs/status {job_id, new_watermark, ...}
+cloud: control/routes/jobs.js
+   -> readModel.js (advance sync_stream_state cursor)
+   -> shared/audit.js (audit: job_result)
+```
+
+## worker (no HTTP)  (Steps 17-20)
+```
+cloud: worker/worker.js
+   -> shared/queue.js     (SQS receive -> object pointer)
+   -> shared/storage.js   (S3 get ciphertext)
+   -> worker/decryptor.js (AES-GCM decrypt, local key)
+   -> worker/applier.js   (check processed_batches + sequence;
+                           upsert/guarded-delete to readModel.js;
+                           advance sync_stream_state)
+   -> shared/audit.js     (audit: processed OR paused)
+   -> shared/queue.js     (delete SQS message on success)
+```
+
+**One-line trace:** `poller -> jobs route -> planner -> validator -> executor ->
+changeDetector -> batcher -> crypto -> spool -> uploader -> batches route ->
+storage(S3) -> queue(SQS) -> worker -> decryptor -> applier -> readModel`.
+
+---
+
+# Libraries (all mainstream + well-documented)
+
+**TypeScript on both sides**, run via **`tsx`** (no compile step — `tsx src/main.ts`
+runs TS directly). Loose `tsconfig` (types catch field/shape mistakes, not lecture).
+TS is the right call here because the data contracts are already designed, Zod gives
+the types for free, and across ~20 files type-checking saves more time than it costs.
+Pick large, popular, heavily-documented libraries so the AI tools generate them
+flawlessly.
+
+## Shared (both sides)
+
+| Need | Library | Why this one |
+|---|---|---|
+| Schemas + validation | **`zod`** | The Pydantic of TS. One schema -> runtime validation AND inferred static type. Validates every boundary payload (Job, Batch, Mapping). Huge adoption + docs. |
+| Run TS without a build | **`tsx`** | Run `.ts` directly, fast iteration, no compile loop. |
+
+## Agent (library side)
+
+| Need | Library | Why this one |
+|---|---|---|
+| SQL Server driver | **`mssql`** (wraps `tedious`) | The standard Node SQL Server client. Pure JS, no system ODBC driver, bundles cleanly into the single `.exe`. Huge docs + examples. |
+| HTTP to cloud | **built-in `fetch`** (Node 18+) | No dependency at all. Use `undici` only if you need fancier control. |
+| Crypto (AES-GCM) | **built-in `node:crypto`** | No dependency. `createCipheriv('aes-256-gcm', ...)`. Well-documented core API. |
+| Local state + spool | **plain JSON files + a `spool/` folder** | Zero native deps -> bundles into the exe with no friction. (Avoid `better-sqlite3` on the agent: it's a native module and fights single-binary packaging.) |
+| CLI args / prompts | **built-in `process.argv`** or **`prompts`** | `prompts` is tiny and popular if you want interactive input; argv is zero-dep. |
+| Single-binary packaging | **Node SEA** (built-in, Node 20+) or **`pkg`** | Bundles runtime + code -> one `agent.exe`. SEA is the official path; `pkg` is the battle-tested community one. Do this last. |
+
+## Cloud side
+
+| Need | Library | Why this one |
+|---|---|---|
+| HTTP framework | **`express`** | The most popular, most documented Node web framework. Routing in minutes. (`fastify` is fine too; express wins on familiarity.) |
+| S3 | **`@aws-sdk/client-s3`** (v3) | Official AWS SDK. `PutObjectCommand` / `GetObjectCommand`. Verbose but everywhere. |
+| SQS | **`@aws-sdk/client-sqs`** (v3) | Official. `SendMessageCommand` / `ReceiveMessageCommand` / `DeleteMessageCommand`. |
+| Read model + audit DB | **`better-sqlite3`** | Synchronous, simple, extremely popular. Fine on the cloud side (native module is no problem off the agent). Swap to **`pg`** if you want real Postgres/RDS. |
+| Crypto (decrypt) | **built-in `node:crypto`** | Mirror of the agent's AES-GCM. |
+| Process manager (run 3 services) | **`pm2`** | Standard for keeping Node processes alive on a box. Or just tmux/screen. |
+
+## Deliberately NOT used (and what to say)
+
+- **No KMS / `@aws-sdk/client-kms`** — local AES-GCM key for the demo. "Wrapped by KMS in production."
+- **No `pyodbc` / Python** — chose Node so the SQL Server driver (`mssql`/`tedious`) is pure-JS and the single-binary story is clean.
+- **No `better-sqlite3` on the agent** — native module fights `.exe` bundling; agent state is JSON files instead.
+- **No API Gateway / Lambda / ECS SDKs** — plain `express` on EC2. "Containers behind an ALB in production."
+- **No Terraform** — create the bucket/queue with the AWS CLI or console. Terraform steals time for no demo value.
+
+## One thing to verify on the day (5 min, first hour)
+
+- **`mssql` connecting to their SQL Server** — confirm version/auth (SQL auth vs Windows auth) works against the sandbox DB early. If SQL Server isn't present or auth fights you, fall back to **SQLite as the source DB** (`better-sqlite3`) and say "abstracted the DB layer; production is SQL Server via `mssql`." Keep this fallback in your pocket; don't pre-build it.
+
+---
+
+# Schemas (Zod) — typed, validated boundaries
+
+Every payload that crosses a boundary is defined once as a Zod schema, shared by
+agent and cloud (no drift). One schema gives both **runtime validation** and the
+**static TS type** (`z.infer`). This is not just hygiene — it is part of the safety
+story: the agent's job validator *parses* the incoming job against `Job` before any
+safety check, so malformed jobs are rejected for free; ingestion parses uploads
+against `Batch` at the door; a bad seeded mapping fails loudly at load, not at query
+time.
+
+```ts
+// shared/schemas.ts
+import { z } from "zod";
+
+export const Strategy = z.enum(["snapshot_hash", "watermark", "open_set_recheck"]);
+
+export const Mapping = z.object({
+  tenant_id: z.string(),
+  mapping_version: z.number().int(),
+  entities: z.record(z.object({
+    source_table: z.string(),
+    stable_key: z.string(),
+    columns: z.array(z.string()).min(1),
+    strategy: Strategy,
+    special_fields: z.record(z.string()).optional(),
+  })),
+});
+
+export const Job = z.object({
+  job_id: z.string(),
+  tenant_id: z.string(),
+  agent_id: z.string(),
+  entity: z.string(),
+  mapping_version: z.number().int(),
+  job_version: z.number().int(),
+  mode: Strategy,
+  sql: z.string(),
+  params: z.record(z.union([z.string(), z.number()])),
+  limits: z.object({
+    timeout_seconds: z.number().positive(),
+    max_rows: z.number().int().positive(),
+    max_bytes: z.number().int().positive(),
+  }),
+  allowlist: z.object({
+    tables: z.array(z.string()).min(1),
+    columns: z.array(z.string()).min(1),
+  }),
+  expires_at: z.string(),         // ISO timestamp
+  signature: z.string(),
+});
+
+export const PollResponse = z.object({
+  job: Job.nullable(),
+  next_poll_seconds: z.number().int(),
+  control_version: z.number().int(),
+});
+
+export const Batch = z.object({
+  batch_id: z.string(),           // tenant:agent:entity:sequence
+  tenant_id: z.string(),
+  agent_id: z.string(),
+  entity: z.string(),
+  sequence: z.number().int().nonnegative(),
+  mapping_version: z.number().int(),
+  content_hash: z.string(),
+  ciphertext: z.string(),         // base64
+  wrapped_data_key: z.string(),   // base64
+  nonce: z.string(),              // base64
+});
+
+export const JobStatus = z.object({
+  job_id: z.string(),
+  status: z.enum(["success", "rejected", "failed", "timeout"]),
+  row_count: z.number().int().optional(),
+  new_watermark: z.number().int().optional(),
+  reason: z.string().optional(),
+});
+
+// Inferred types for free:
+export type Mapping = z.infer<typeof Mapping>;
+export type Job = z.infer<typeof Job>;
+export type Batch = z.infer<typeof Batch>;
+```
+
+**Usage at the boundaries:**
+```ts
+// agent safety gate — parse first, THEN enforce safety envelope
+const job = Job.parse(resp.job);          // throws on malformed job
+assertReadOnly(job.sql);                  // no INSERT/UPDATE/DELETE/DDL/multi-stmt
+assertAllowlisted(job);                   // tables/columns in allowlist
+assertLimits(job.limits);                 // within local maximums
+
+// cloud ingestion — reject garbage at the door
+const batch = Batch.parse(req.body);
+
+// cloud startup — fail loudly on a bad seeded mapping
+const mapping = Mapping.parse(JSON.parse(readFileSync("seed/mappings/maplewood.json")));
+```
+
+The audit rows and local sync-state records also get small schemas, but Job, Batch,
+Mapping, PollResponse, and JobStatus are the load-bearing ones.
+
+---
+
+# Deployment
+
+Not localhost — the agent (Windows sandbox) and cloud are separate boxes.
+
+**Run the cloud on an EC2 instance in the AWS sandbox.** Three processes:
+```
+EC2 (in the sandbox VPC)
+├── node src/control/server.js     :3001
+├── node src/ingestion/server.js   :3002
+└── node src/worker/worker.js      (no port, polls SQS)
+```
+Keep them up with pm2 or tmux/screen.
+
+**Networking:**
+- Same VPC as the Windows box -> agent uses EC2 private IP; security group allows
+  3001/3002 from the Windows box. Cleanest, no public exposure.
+- Otherwise -> EC2 public IP + security group opening 3001/3002 (lock to agent IP).
+
+**AWS resources total:** 1 EC2, 1 S3 bucket, 1 SQS FIFO queue, 1 IAM access key.
+No RDS (SQLite), no KMS (local AES), no API Gateway / Lambda / ECS (plain Node).
+
+**Fallback if EC2 fights you:** run cloud on the laptop, `ngrok http 3001/3002`,
+agent points at the ngrok URLs. Demo-grade, weaker story.
+
+**First-hour check:** is an EC2 box pre-provisioned, and is it in the same VPC as
+the Windows sandbox? That decides private vs public IP and saves setup time.
+
+**Production story (narrate, don't build):** control plane, ingestion, and worker
+are separate containers behind an ALB doing mTLS; S3 landing, SQS FIFO, RDS read
+model, KMS keys. Today they are three Node processes on EC2, with real S3 + SQS for
+durable handoff and async decoupling, read model and keys local, so the day goes to
+the data contract rather than infra plumbing.
